@@ -1,0 +1,14 @@
+version: 0.1
+default:
+  global:
+    parameters:
+      stack_name: http-api-lambda-python-graviton-tutorial
+      region: eu-north-1
+      resolve_s3: true
+      confirm_changeset: false
+      fail_on_empty_changeset: false
+      capabilities: CAPABILITY_NAMED_IAM
+  deploy:
+    parameters:
+      parameter_overrides:
+        - Application=graviton-tutorial

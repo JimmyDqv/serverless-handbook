@@ -1,0 +1,18 @@
+Comment: Delete an existing key in a KeyValueStore
+StartAt: DescribeKeyValueStore
+States:
+    DescribeKeyValueStore:
+        Type: Task
+        Parameters:
+            KvsARN: ${KvsArn}
+        Resource: arn:aws:states:::aws-sdk:cloudfrontkeyvaluestore:describeKeyValueStore
+        ResultPath: $.DescribeResult
+        Next: DeleteKey
+    DeleteKey:
+        Type: Task
+        End: true
+        Parameters:
+            IfMatch.$: $.DescribeResult.ETag
+            KvsARN.$: $.DescribeResult.KvsARN
+            Key.$: $.Key
+        Resource: arn:aws:states:::aws-sdk:cloudfrontkeyvaluestore:deleteKey

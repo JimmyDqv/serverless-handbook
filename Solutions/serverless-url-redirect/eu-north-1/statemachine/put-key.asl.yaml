@@ -1,0 +1,19 @@
+Comment: Put a new or update an existing key in a KeyValueStore
+StartAt: DescribeKeyValueStore
+States:
+    DescribeKeyValueStore:
+        Type: Task
+        Parameters:
+            KvsARN: ${KvsArn}
+        Resource: arn:aws:states:::aws-sdk:cloudfrontkeyvaluestore:describeKeyValueStore
+        ResultPath: $.DescribeResult
+        Next: PutKey
+    PutKey:
+        Type: Task
+        Parameters:
+            IfMatch.$: $.DescribeResult.ETag
+            KvsARN.$: $.DescribeResult.KvsARN
+            Key.$: $.Key
+            Value.$: $.Value
+        Resource: arn:aws:states:::aws-sdk:cloudfrontkeyvaluestore:putKey
+        End: true

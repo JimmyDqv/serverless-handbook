@@ -1,0 +1,24 @@
+version: 0.1
+prod:
+  global:
+    parameters:
+      stack_name: serverless-auth-infra
+      region: eu-north-1
+      confirm_changeset: false
+      capabilities: CAPABILITY_NAMED_IAM
+      s3_prefix: serverless-auth-infra
+      resolve_s3: true
+  deploy:
+    parameters:
+      parameter_overrides:
+        - Environment=
+        - ApplicationName=
+        - DomainName=
+        - HostedZoneId=
+        - BucketNameSuffix=
+        - SSLCertificateArn=
+        - SignInFunctionArn=
+        - SignOutFunctionArn=
+        - AuthorizeFunctionArn=
+        - RefreshFunctionArn=
+        - IndexPathFunctionArn=

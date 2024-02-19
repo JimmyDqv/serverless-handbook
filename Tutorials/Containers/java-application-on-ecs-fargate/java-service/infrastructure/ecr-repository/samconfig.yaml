@@ -1,0 +1,15 @@
+version: 0.1
+default:
+  global:
+    parameters:
+      stack_name: java-fargate-ecs-tutorial-ecr-hello
+      region: eu-west-1
+      resolve_s3: true
+      confirm_changeset: false
+      fail_on_empty_changeset: false
+      capabilities: CAPABILITY_NAMED_IAM
+  deploy:
+    parameters:
+      parameter_overrides:
+        - Application=java-fargate
+        - Service=hello

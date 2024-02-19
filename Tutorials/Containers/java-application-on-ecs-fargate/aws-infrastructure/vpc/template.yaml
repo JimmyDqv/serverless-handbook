@@ -1,0 +1,228 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: setup basic VPC for ECS Fargate Turorial
+
+Parameters:
+  Application:
+    Type: String
+  IPSuperSet:
+    Type: String
+    Description: The IP Superset to use for the VPC CIDR range, e.g 10.0
+    Default: "10.0"
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      CidrBlock: !Sub "${IPSuperSet}.0.0/16"
+      Tags:
+        - Key: Name
+          Value: !Ref Application
+
+  PublicSubnetOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: { Ref: "AWS::Region" }
+      VpcId: !Ref VPC
+      CidrBlock: !Sub ${IPSuperSet}.0.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${Application}-public-one
+
+  PublicSubnetTwo:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: { Ref: "AWS::Region" }
+      VpcId: !Ref VPC
+      CidrBlock: !Sub ${IPSuperSet}.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${Application}-public-two
+
+  PrivateSubnetOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: { Ref: "AWS::Region" }
+      VpcId: !Ref VPC
+      CidrBlock: !Sub ${IPSuperSet}.2.0/24
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${Application}-private-one
+
+  PrivateSubnetTwo:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: { Ref: "AWS::Region" }
+      VpcId: !Ref VPC
+      CidrBlock: !Sub ${IPSuperSet}.3.0/24
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${Application}-private-two
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Ref Application
+
+  GatewayAttachement:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  NatGatewayIpOne:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${Application}-natgateway-one
+
+  NatGatewayOne:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayIpOne.AllocationId
+      SubnetId: !Ref PublicSubnetOne
+      Tags:
+        - Key: Name
+          Value: !Sub ${Application}-natgateway-one
+
+  NatGatewayIpTwo:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${Application}-natgateway-two
+
+  NatGatewayTwo:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayIpTwo.AllocationId
+      SubnetId: !Ref PublicSubnetTwo
+      Tags:
+        - Key: Name
+          Value: !Sub ${Application}-natgateway-two
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Application}-public-rt
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachement
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetOneRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetOne
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetTwoRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetTwo
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateRouteTableOne:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Application}-private-rt-one
+
+  PrivateRouteOne:
+    Type: AWS::EC2::Route
+    DependsOn: NatGatewayOne
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableOne
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayOne
+
+  PrivateSubnetOneRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetOne
+      RouteTableId: !Ref PrivateRouteTableOne
+
+  PrivateRouteTableTwo:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Application}-private-rt-two
+
+  PrivateRouteTwo:
+    Type: AWS::EC2::Route
+    DependsOn: NatGatewayTwo
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableTwo
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayTwo
+
+  PrivateSubnetTwoRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetTwo
+      RouteTableId: !Ref PrivateRouteTableTwo
+
+Outputs:
+  VpcId:
+    Description: The ID of the VPC
+    Value: !Ref VPC
+    Export:
+      Name: !Sub ${AWS::StackName}:VpcId
+  VpcCidr:
+    Description: The Cidr of the VPC
+    Value: !Sub ${IPSuperSet}.0.0/16
+    Export:
+      Name: !Sub ${AWS::StackName}:Cidr
+  PublicSubnetOne:
+    Description: The Public Subnet One
+    Value: !Ref PublicSubnetOne
+    Export:
+      Name: !Sub ${AWS::StackName}:PublicSubnetOne
+  PublicSubnetTwo:
+    Description: The Public Subnet Two
+    Value: !Ref PublicSubnetTwo
+    Export:
+      Name: !Sub ${AWS::StackName}:PublicSubnetTwo
+  PrivateSubnetOne:
+    Description: The Private Subnet One
+    Value: !Ref PrivateSubnetOne
+    Export:
+      Name: !Sub ${AWS::StackName}:PrivateSubnetOne
+  PrivateSubnetTwo:
+    Description: The Private Subnet Two
+    Value: !Ref PrivateSubnetTwo
+    Export:
+      Name: !Sub ${AWS::StackName}:PrivateSubnetTwo

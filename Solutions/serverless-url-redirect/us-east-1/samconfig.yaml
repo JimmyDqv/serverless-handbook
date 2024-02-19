@@ -1,0 +1,16 @@
+version: 0.1
+prod:
+  global:
+    parameters:
+      stack_name: serverless-url-redirect-certificate
+      region: us-east-1
+      confirm_changeset: false
+      resolve_s3: true
+      capabilities: CAPABILITY_NAMED_IAM
+  deploy:
+    parameters:
+      parameter_overrides:
+        - Environment=prod
+        - ApplicationName=serverless-redirect
+        - DomainName=<YOUR DOMAIN NAME>
+        - HostedZoneId=<YOUR HOSTED ZONE ID>

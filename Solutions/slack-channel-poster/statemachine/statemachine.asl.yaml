@@ -1,0 +1,17 @@
+Comment: Post to Slack
+StartAt: Post to Slack Channel
+States:
+    Post to Slack Channel:
+        Type: Task
+        Resource: arn:aws:states:::http:invoke
+        Parameters:
+            Authentication:
+                ConnectionArn: ${EBConnectionArn}
+            Method: POST
+            RequestBody:
+                channel.$: $.channel
+                text.$: $.text
+            Headers:
+                Content-type: application/json
+            ApiEndpoint: https://slack.com/api/chat.postMessage
+        End: true

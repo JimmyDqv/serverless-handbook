@@ -1,0 +1,36 @@
+openapi: "3.0.1"
+info:
+  title: "update-cloudfront-key-value-store"
+paths:
+  /keyvalue:
+    post:
+      responses:
+        default:
+          description: "Default response"
+      x-amazon-apigateway-integration:
+        integrationSubtype: "StepFunctions-StartSyncExecution"
+        credentials:
+          Fn::GetAtt: [HttpApiRole, Arn]
+        requestParameters:
+          Input: "$request.body"
+          StateMachineArn:
+            Fn::GetAtt: [PutKeyStateMachine, Arn]
+        payloadFormatVersion: "1.0"
+        type: "aws_proxy"
+        connectionType: "INTERNET"
+    delete:
+      responses:
+        default:
+          description: "Default response"
+      x-amazon-apigateway-integration:
+        integrationSubtype: "StepFunctions-StartSyncExecution"
+        credentials:
+          Fn::GetAtt: [HttpApiRole, Arn]
+        requestParameters:
+          Input: "$request.body"
+          StateMachineArn:
+            Fn::GetAtt: [DeleteKeyStateMachine, Arn]
+        payloadFormatVersion: "1.0"
+        type: "aws_proxy"
+        connectionType: "INTERNET"
+x-amazon-apigateway-importexport-version: "1.0"

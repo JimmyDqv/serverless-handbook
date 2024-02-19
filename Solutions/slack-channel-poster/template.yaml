@@ -1,0 +1,59 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Create StepFunction calling Slack API.
+
+Parameters:
+  Application:
+    Type: String
+    Description: Name of the application
+    Default: slack-endpoint-demo
+
+Resources:
+  SlackApiConnection:
+    Type: AWS::Events::Connection
+    Properties:
+      AuthorizationType: API_KEY
+      AuthParameters:
+        ApiKeyAuthParameters:
+          ApiKeyName: Authorization
+          ApiKeyValue: Bearer {{resolve:secretsmanager:/slack/app/token}}
+      Description: Call Slack API
+      Name: slack-api
+
+  SlackSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Slack Oauth Token Secret
+      Name: /slack/app/token
+
+  PostToSlackStateMachineStandard:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: statemachine/statemachine.asl.yaml
+      Tracing:
+        Enabled: true
+      DefinitionSubstitutions:
+        EBConnectionArn: !GetAtt SlackApiConnection.Arn
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:*
+              Resource: "*"
+        - Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+                - secretsmanager:DescribeSecret
+              Resource: !GetAtt SlackApiConnection.SecretArn
+        - Statement:
+            - Effect: Allow
+              Action:
+                - events:*
+              Resource: !GetAtt SlackApiConnection.Arn
+        - Statement:
+            - Effect: Allow
+              Action:
+                - states:InvokeHTTPEndpoint
+              Resource: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:*
+      Type: STANDARD

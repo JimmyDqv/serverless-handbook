@@ -1,0 +1,178 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Setup Infrastructure for services and tasks to run in for ECS Fargate Tutorial
+
+Parameters:
+  Application:
+    Type: String
+  VPCStackName:
+    Type: String
+    Description: Name of the Stack that created the VPC
+  DomainName:
+    Type: String
+    Description: Domain name to use for the ALB
+  HostedZoneId:
+    Type: String
+    Description: Hosted Zone ID for the Route53 hosted zone for the DomainName
+
+Resources:
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${Application}-ecs-cluster
+      ClusterSettings:
+        - Name: containerInsights
+          Value: disabled
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+      Tags:
+        - Key: Name
+          Value: !Sub ${Application}
+
+  ECSClusterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${Application}-cluster-security-group
+      GroupDescription: Security group for cluster
+      VpcId:
+        Fn::ImportValue: !Sub ${VPCStackName}:VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !GetAtt ApplicationLoadBalancerSecurityGroup.GroupId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${Application}-cluster-security-group
+
+  ECSClusterTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${Application}-cluster-role
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub ${Application}-cluster-role-policy
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+      Tags:
+        - Key: Name
+          Value: !Sub ${Application}-cluster-role
+
+  ApplicationLoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Access to the public facing load balancer
+      VpcId:
+        Fn::ImportValue: !Sub ${VPCStackName}:VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${Application}-alb-sg
+
+  ApplicationLoadBalancerCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      CertificateTransparencyLoggingPreference: ENABLED
+      DomainName: !Ref DomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref DomainName
+          HostedZoneId: !Ref HostedZoneId
+
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      Name: !Sub ${Application}-alb
+      Type: application
+      Subnets:
+        - Fn::ImportValue: !Sub ${VPCStackName}:PublicSubnetOne
+        - Fn::ImportValue: !Sub ${VPCStackName}:PublicSubnetTwo
+      SecurityGroups:
+        - !Ref ApplicationLoadBalancerSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${Application}-alb
+
+  ApplicationLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - FixedResponseConfig:
+            StatusCode: 503
+          Type: fixed-response
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref ApplicationLoadBalancerCertificate
+
+  ApplicationLoadBalancerServiceDNS:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Comment: Zone alias targeted to ApplicationLoadBalancer
+      RecordSets:
+        - Name: !Ref DomainName
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt ApplicationLoadBalancer.DNSName
+            HostedZoneId: !GetAtt ApplicationLoadBalancer.CanonicalHostedZoneID
+
+Outputs:
+  ECSCluster:
+    Description: The ECS Cluster
+    Value: !Ref ECSCluster
+    Export:
+      Name: !Sub ${AWS::StackName}:ecs-cluster
+  ECSClusterTaskExecutionRoleArn:
+    Value: !GetAtt ECSClusterTaskExecutionRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:cluster-role
+  ECSClusterSecurityGroupArn:
+    Value: !Ref ECSClusterSecurityGroup
+    Export:
+      Name: !Sub ${AWS::StackName}:cluster-sg
+  ApplicationLoadBalancerSecurityGroupArn:
+    Description: The Load balancer Security Group
+    Value: !Ref ApplicationLoadBalancerSecurityGroup
+    Export:
+      Name: !Sub ${AWS::StackName}:alb-sg
+  ApplicationLoadBalancerArn:
+    Description: The Load balancer ARN
+    Value: !Ref ApplicationLoadBalancer
+    Export:
+      Name: !Sub ${AWS::StackName}:alb-arn
+  ApplicationLoadBalancerListener:
+    Description: The Load balancer listener
+    Value: !Ref ApplicationLoadBalancerListener
+    Export:
+      Name: !Sub ${AWS::StackName}:alb-listener

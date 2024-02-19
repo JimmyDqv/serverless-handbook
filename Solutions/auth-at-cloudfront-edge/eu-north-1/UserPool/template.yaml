@@ -1,0 +1,135 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: Creates the User Pool and Client used for Authentication
+Parameters:
+  Environment:
+    Type: String
+    Description: Environment type
+  ApplicationName:
+    Type: String
+    Description: The application that owns this setup.
+  DomainName:
+    Type: String
+    Description: The domain name to use for cloudfront
+  HostedAuthDomainPrefix:
+    Type: String
+    Description: The domain prefix to use for the UserPool hosted UI <HostedAuthDomainPrefix>.auth.[region].amazoncognito.com
+  UserPoolSecretName:
+    Type: String
+    Description: The name that will be used in Secrets manager to store the User Pool Secret
+
+Resources:
+  ##########################################################################
+  #  UserPool
+  ##########################################################################
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UsernameConfiguration:
+        CaseSensitive: false
+      AutoVerifiedAttributes:
+        - email
+      UserPoolName: !Sub ${Environment}-${ApplicationName}-user-pool
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: false
+          Required: true
+        - Name: name
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      GenerateSecret: True
+      AllowedOAuthFlowsUserPoolClient: true
+      CallbackURLs:
+        - !Sub https://${DomainName}/signin
+      AllowedOAuthFlows:
+        - code
+        - implicit
+      AllowedOAuthScopes:
+        - phone
+        - email
+        - openid
+        - profile
+      SupportedIdentityProviders:
+        - COGNITO
+
+  HostedUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Ref HostedAuthDomainPrefix
+      UserPoolId: !Ref UserPool
+
+  UserPoolSecretNameParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Environment}/serverlessAuth/userPoolSecretName
+      Type: String
+      Value: !Ref UserPoolSecretName
+      Description: SSM Parameter for the User Pool Secret Name
+      Tags:
+        Environment: !Ref Environment
+        ApplicationName: !Ref ApplicationName
+
+  UserPoolEndpointParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Environment}/serverlessAuth/userPoolEndpoint
+      Type: String
+      Value: !Sub https://${HostedAuthDomainPrefix}.auth.${AWS::Region}.amazoncognito.com/oauth2/token
+      Description: SSM Parameter for the User Pool Endpoint
+      Tags:
+        Environment: !Ref Environment
+        ApplicationName: !Ref ApplicationName
+
+  UserPoolIdParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Environment}/serverlessAuth/userPoolId
+      Type: String
+      Value: !Ref UserPool
+      Description: SSM Parameter for the User Pool Id
+      Tags:
+        Environment: !Ref Environment
+        ApplicationName: !Ref ApplicationName
+
+  UserPoolHostedUiParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Environment}/serverlessAuth/userPoolHostedUi
+      Type: String
+      Value: !Sub https://${HostedAuthDomainPrefix}.auth.${AWS::Region}.amazoncognito.com/login?client_id=${UserPoolClient}&response_type=code&scope=email+openid+phone+profile&redirect_uri=https://${DomainName}/signin
+      Description: SSM Parameter for the User Pool Hosted UI
+      Tags:
+        Environment: !Ref Environment
+        ApplicationName: !Ref ApplicationName
+
+  ContentRootParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Environment}/serverlessAuth/contentRoot
+      Type: String
+      Value: !Sub https://${DomainName}
+      Description: SSM Parameter for the Content Root
+      Tags:
+        Environment: !Ref Environment
+        ApplicationName: !Ref ApplicationName
+
+Outputs:
+  CognitoUserPoolID:
+    Value: !Ref UserPool
+    Description: The UserPool ID
+  CognitoAppClientID:
+    Value: !Ref UserPoolClient
+    Description: The app client
+  CognitoUrl:
+    Description: The url
+    Value: !GetAtt UserPool.ProviderURL
+  CognitoHostedUI:
+    Value: !Sub https://${HostedAuthDomainPrefix}.auth.${AWS::Region}.amazoncognito.com/login?client_id=${UserPoolClient}&response_type=code&scope=email+openid+phone+profile&redirect_uri=https://${DomainName}/signin
+    Description: The hosted UI URL

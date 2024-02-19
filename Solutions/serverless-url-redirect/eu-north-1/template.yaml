@@ -1,0 +1,224 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: Creates a serverless url redirect
+Parameters:
+  Environment:
+    Type: String
+    Description: Environment type, dev, test, prod
+    AllowedValues:
+      - dev
+      - test
+      - prod
+  ApplicationName:
+    Type: String
+    Description: The application that owns this setup.
+  DomainName:
+    Type: String
+    Description: The domain name to use for cloudfront
+  HostedZoneId:
+    Type: String
+    Description: The id for the Route53 hosted zone
+  SSLCertificateArn:
+    Type: String
+    Description: The ARN to the SSL certificate that exists in ACM in us-east-1
+  BaseSiteUrl:
+    Type: String
+    Description: The base site to redirect to as fallback
+
+Resources:
+  RedirectKeyValueStore:
+    Type: AWS::CloudFront::KeyValueStore
+    Properties:
+      Comment: !Sub Key Value Store for the ${ApplicationName} ${Environment}
+      Name: redirect-urls
+
+  RedirectFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      AutoPublish: true
+      FunctionCode: !Sub |
+        import cf from 'cloudfront';
+
+        const kvsId = '${RedirectKeyValueStore.Id}';
+        const kvsHandle = cf.kvs(kvsId);
+
+        async function handler(event) {
+            const request = event.request;
+            const headers = request.headers;
+            const key = request.uri.split('/')[1]
+            let base = "${BaseSiteUrl}";
+            let value = ""; // Default value
+            try {
+                value = await kvsHandle.get(key);
+            } catch (err) {
+                console.log(`Kvs key lookup failed.`);
+            }
+
+            let newurl = base + value
+            const response = {
+                statusCode: 302,
+                statusDescription: 'Found',
+                headers:
+                    { "location": { "value": newurl } }
+                }
+
+            return response;
+                
+        }
+      FunctionConfig:
+        Comment: Function for url redirect
+        KeyValueStoreAssociations:
+          - KeyValueStoreARN: !GetAtt RedirectKeyValueStore.Arn
+        Runtime: cloudfront-js-2.0
+      Name: !Sub ${ApplicationName}-${Environment}-redirect-function
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Aliases:
+          - !Ref DomainName
+        Comment: !Sub Distribution for the ${ApplicationName} ${Environment}
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: "/404.html"
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - "GET"
+            - "HEAD"
+            - "OPTIONS"
+          Compress: False
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad #Managed Cache Policy 'CachingDisabled'
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt RedirectFunction.FunctionMetadata.FunctionARN
+          TargetOriginId: function-redirect-origin
+          ViewerProtocolPolicy: redirect-to-https
+        DefaultRootObject: index.html
+        Enabled: True
+        Origins:
+          - DomainName: !Sub handle-redirect.${DomainName}
+            Id: function-redirect-origin
+            CustomOriginConfig:
+              OriginProtocolPolicy: match-viewer
+        PriceClass: PriceClass_100
+        ViewerCertificate:
+          AcmCertificateArn: !Ref SSLCertificateArn
+          SslSupportMethod: sni-only
+      Tags:
+        - Key: Application
+          Value: !Ref ApplicationName
+        - Key: Name
+          Value: !Sub ${ApplicationName}-${Environment}
+
+  Route53Record:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      AliasTarget:
+        DNSName: !GetAtt CloudFrontDistribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2 # CloudFront static value
+      Comment: !Sub "Record for ${ApplicationName}-${Environment} cloudfront distribution"
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub ${DomainName}.
+      Type: A
+
+  PutKeyStateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "${ApplicationName}/putstatemachine"
+      RetentionInDays: 1
+
+  PutKeyStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: statemachine/put-key.asl.yaml
+      Tracing:
+        Enabled: true
+      Logging:
+        Level: ALL
+        IncludeExecutionData: True
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt PutKeyStateMachineLogGroup.Arn
+      DefinitionSubstitutions:
+        KvsArn: !GetAtt RedirectKeyValueStore.Arn
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:*
+              Resource: "*"
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cloudfront-keyvaluestore:DescribeKeyValueStore
+                - cloudfront-keyvaluestore:PutKey
+              Resource: !GetAtt RedirectKeyValueStore.Arn
+      Type: EXPRESS
+
+  DeleteKeyStateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "${ApplicationName}/deletestatemachine"
+      RetentionInDays: 1
+
+  DeleteKeyStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: statemachine/delete-key.asl.yaml
+      Tracing:
+        Enabled: true
+      Logging:
+        Level: ALL
+        IncludeExecutionData: True
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt DeleteKeyStateMachineLogGroup.Arn
+      DefinitionSubstitutions:
+        KvsArn: !GetAtt RedirectKeyValueStore.Arn
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:*
+              Resource: "*"
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cloudfront-keyvaluestore:DescribeKeyValueStore
+                - cloudfront-keyvaluestore:DeleteKey
+              Resource: !GetAtt RedirectKeyValueStore.Arn
+      Type: EXPRESS
+
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      DefinitionBody:
+        Fn::Transform:
+          Name: AWS::Include
+          Parameters:
+            Location: api/api.yaml
+
+  HttpApiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: ApiDirectInvokeStepFunctions
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Action:
+                - states:StartSyncExecution
+              Effect: Allow
+              Resource:
+                - !Ref PutKeyStateMachine
+                - !Ref DeleteKeyStateMachine

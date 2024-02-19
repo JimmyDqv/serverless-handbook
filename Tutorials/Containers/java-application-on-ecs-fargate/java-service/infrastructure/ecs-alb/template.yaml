@@ -1,0 +1,157 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Setup and configure the Service running in Fargate
+
+Parameters:
+  Application:
+    Type: String
+    Description: Name of the application owning all resources
+  Service:
+    Type: String
+    Description: Name of the service
+  ServiceTag:
+    Type: String
+    Description: The service Docker Image tag to deploy
+    Default: latest
+  VPCStackName:
+    Type: String
+    Description: Name of the Stack that created the VPC
+  ServiceInfraStackName:
+    Type: String
+    Description: Name of the Stack that created the service infrastructure, such as ECS cluster etc
+
+Resources:
+  ServiceTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${Application}-${Service}-tg
+      Port: 8080
+      Protocol: HTTP
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 1
+      TargetType: ip
+      VpcId:
+        Fn::ImportValue: !Sub ${VPCStackName}:VpcId
+      HealthCheckEnabled: true
+      HealthCheckIntervalSeconds: 5
+      HealthCheckTimeoutSeconds: 2
+      HealthCheckPath: /hello
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: HTTP
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Tags:
+        - Key: Name
+          Value: !Sub ${Application}-${Service}-target-group
+
+  LoadBalancerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - TargetGroupArn: !Ref ServiceTargetGroup
+          Type: forward
+      Conditions:
+        - Field: path-pattern
+          Values: [/hello]
+      ListenerArn:
+        Fn::ImportValue: !Sub ${ServiceInfraStackName}:alb-listener
+      Priority: 200
+
+  ServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/${Application}/${Service}
+      RetentionInDays: 60
+      Tags:
+        - Key: Name
+          Value: !Sub ${Application}-${Service}-logs
+
+  ServiceTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Role for Demo task definition to set task specific role
+      RoleName: !Sub ${Application}-${Service}-task-role
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Tags:
+        - Key: Name
+          Value: !Sub ${Application}-${Service}-role
+
+  ServiceTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${Application}-${Service}-task
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      ExecutionRoleArn:
+        Fn::ImportValue: !Sub ${ServiceInfraStackName}:cluster-role
+      TaskRoleArn: !Sub ${Application}-${Service}-task-role
+      Cpu: 512
+      Memory: 1024
+      ContainerDefinitions:
+        - Name: !Ref Service
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Application}-${Service}:${ServiceTag}
+          Cpu: 512
+          Memory: 1024
+          Environment:
+            - Name: NAME
+              Value: !Ref Service
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Sub /ecs/${Application}/${Service}
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: !Ref Service
+      Tags:
+        - Key: Name
+          Value: !Sub ${Application}-${Service}-task
+
+  ApplicationService:
+    Type: AWS::ECS::Service
+    DependsOn: LoadBalancerRule
+    Properties:
+      ServiceName: !Sub ${Application}-${Service}
+      CapacityProviderStrategy:
+        - Base: 1
+          CapacityProvider: FARGATE_SPOT
+          Weight: 1
+      LaunchType: FARGATE
+      TaskDefinition: !Ref ServiceTaskDefinition
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - Fn::ImportValue: !Sub ${ServiceInfraStackName}:cluster-sg
+          Subnets:
+            - Fn::ImportValue: !Sub ${VPCStackName}:PrivateSubnetOne
+            - Fn::ImportValue: !Sub ${VPCStackName}:PrivateSubnetTwo
+      DesiredCount: 1
+      LoadBalancers:
+        - TargetGroupArn: !Ref ServiceTargetGroup
+          ContainerPort: 8080
+          ContainerName: !Ref Service
+      Cluster:
+        Fn::ImportValue: !Sub ${ServiceInfraStackName}:ecs-cluster
+      HealthCheckGracePeriodSeconds: 60
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 50
+      Tags:
+        - Key: Name
+          Value: !Sub ${Application}-${Service}-service
+
+Outputs:
+  ServiceTargetGroup:
+    Value: !Ref ServiceTargetGroup
+    Export:
+      Name: !Sub ${AWS::StackName}:target-group
