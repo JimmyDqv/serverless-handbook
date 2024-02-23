@@ -6,7 +6,7 @@
 
 I'm Jimmy Dahlqvist, cloud architect and developer with deep-rooted passion for serverless and event-driven design.
 
-This is the home to my learnings and experiences working with serverless and event-driven workloads on AWS. I started working with serverless technologies back in 2016. You who have heard my public talks might remember me saying that when I started AWS Lambda had a maximum memory of 1024mb and there was no environment variables, that is how Lambda-old I am.
+This is the home to my learnings and experiences working with serverless and event-driven workloads on AWS. I started working with serverless technologies back in 2015. You who have heard my public talks might remember me saying that when I started AWS Lambda had a maximum memory of 1024mb and there was no environment variables, that is how Lambda-old I am.
 
 As an AWS Ambassador and AWS Community Builder, I've dedicated myself to sharing knowledge and contributing to the broader AWS community.
 
