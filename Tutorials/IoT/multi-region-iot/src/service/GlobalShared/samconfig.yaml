@@ -1,0 +1,13 @@
+version: 0.1
+eu-west-1:
+  global:
+    parameters:
+      stack_name: multi-region-iot-globally-shared-resources
+      region: eu-west-1
+      confirm_changeset: false
+      capabilities: CAPABILITY_NAMED_IAM
+      s3_prefix: multi-region-iot-globally-shared-resources
+      resolve_s3: true
+  deploy:
+    parameters:
+      parameter_overrides: Application=multi-region-iot

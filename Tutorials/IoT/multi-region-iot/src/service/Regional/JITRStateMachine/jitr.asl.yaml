@@ -1,0 +1,180 @@
+Comment: JITR StateMachine
+StartAt: Describe Certificate
+States:
+    Describe Certificate:
+        Type: Task
+        Next: Fetch Certificate Data
+        Parameters:
+            CertificateId.$: $.certificateId
+        Resource: arn:aws:states:::aws-sdk:iot:describeCertificate
+        ResultPath: $.CertificateInfo
+    Fetch Certificate Data:
+        Type: Task
+        Resource: ${ReadCertificateFunctionArn}
+        ResultPath: $.CertificateData
+        Next: Search Thing
+    Search Thing:
+        Type: Task
+        Next: Thing Exists?
+        Parameters:
+            TableName: ${InventoryTable}
+            KeyConditionExpression: ThingName = :pk
+            ExpressionAttributeValues:
+                ":pk":
+                    S.$: $.CertificateData.CommonName
+        ResultPath: $.ThingQueryResult
+        Resource: arn:aws:states:::aws-sdk:dynamodb:query
+    Thing Exists?:
+        Type: Choice
+        Choices:
+            - Variable: $.ThingQueryResult.Count
+              NumericGreaterThan: 0
+              Comment: Thing Exists!
+              Next: Thing Created Success
+            - Variable: $.ThingQueryResult.Count
+              NumericLessThanEquals: 0
+              Comment: Create new Thing!
+              Next: Create Thing
+        Default: Thing Created Success
+    Create Thing:
+        Type: Task
+        Next: Attach Certificate To Thing
+        Parameters:
+            ThingName.$: $.CertificateData.CommonName
+        Resource: arn:aws:states:::aws-sdk:iot:createThing
+        ResultPath: $.Thing
+        Retry:
+            - ErrorEquals:
+                  - States.ALL
+              BackoffRate: 2
+              IntervalSeconds: 1
+              MaxAttempts: 2
+              Comment: Retry Create thing
+        Catch:
+            - ErrorEquals:
+                  - States.ALL
+              Comment: Failed to Create Thing
+              Next: Failed To Register Thing
+    Attach Certificate To Thing:
+        Type: Task
+        Next: Attach Policy To Certificate
+        Parameters:
+            Principal.$: $.CertificateInfo.CertificateDescription.CertificateArn
+            ThingName.$: $.CertificateData.CommonName
+        Resource: arn:aws:states:::aws-sdk:iot:attachThingPrincipal
+        ResultPath: null
+        Retry:
+            - ErrorEquals:
+                  - States.ALL
+              BackoffRate: 2
+              IntervalSeconds: 1
+              MaxAttempts: 2
+              Comment: Retry Attach Certificate
+        Catch:
+            - ErrorEquals:
+                  - States.ALL
+              Comment: Failed to Attach Certificate
+              Next: Rollback Create Thing
+    Rollback Create Thing:
+        Type: Task
+        Next: Failed To Register Thing
+        Parameters:
+            ThingName.$: $.CertificateData.CommonName
+        Resource: arn:aws:states:::aws-sdk:iot:deleteThing
+    Attach Policy To Certificate:
+        Type: Task
+        Next: Activate Certificate
+        Parameters:
+            PolicyName: Iot-Device-Policy
+            Target.$: $.CertificateInfo.CertificateDescription.CertificateArn
+        Resource: arn:aws:states:::aws-sdk:iot:attachPolicy
+        ResultPath: null
+        Retry:
+            - ErrorEquals:
+                  - States.ALL
+              BackoffRate: 2
+              IntervalSeconds: 1
+              MaxAttempts: 2
+              Comment: Retry Attach Policy
+        Catch:
+            - ErrorEquals:
+                  - States.ALL
+              Comment: Failed to Attach Policy
+              Next: Rollback Attach Certificate To Thing
+    Rollback Attach Certificate To Thing:
+        Type: Task
+        Next: Rollback Create Thing
+        Parameters:
+            Principal.$: $.CertificateInfo.CertificateDescription.CertificateArn
+            ThingName.$: $.CertificateData.CommonName
+        Resource: arn:aws:states:::aws-sdk:iot:detachThingPrincipal
+    Activate Certificate:
+        Type: Task
+        Next: Add Device In Registry
+        Parameters:
+            CertificateId.$: $.certificateId
+            NewStatus: ACTIVE
+        Resource: arn:aws:states:::aws-sdk:iot:updateCertificate
+        ResultPath: null
+        Retry:
+            - ErrorEquals:
+                  - States.ALL
+              BackoffRate: 2
+              IntervalSeconds: 1
+              MaxAttempts: 2
+              Comment: Retry Activate Certificate
+        Catch:
+            - ErrorEquals:
+                  - States.ALL
+              Comment: Failed to Activate Certificate
+              Next: Rollback Attach Policy To Certificate
+    Rollback Attach Policy To Certificate:
+        Type: Task
+        Next: Rollback Attach Certificate To Thing
+        Parameters:
+            PolicyName: Iot-Device-Policy
+            Target.$: $.CertificateInfo.CertificateDescription.CertificateArn
+        Resource: arn:aws:states:::aws-sdk:iot:detachPolicy
+    Add Device In Registry:
+        Type: Task
+        Resource: arn:aws:states:::dynamodb:putItem
+        Parameters:
+            TableName: ${InventoryTable}
+            Item:
+                ThingName:
+                    S.$: $.Thing.ThingName
+                ThingId:
+                    S.$: $.Thing.ThingId
+                ThingArn:
+                    S.$: $.Thing.ThingArn
+                CertificateArn:
+                    S.$: $.CertificateInfo.CertificateDescription.CertificateArn
+                CaCertificateId:
+                    S.$: $.CertificateInfo.CertificateDescription.CaCertificateId
+                NotAfter:
+                    S.$: $.CertificateInfo.CertificateDescription.Validity.NotAfter
+        ResultPath: null
+        Retry:
+            - ErrorEquals:
+                  - States.ALL
+              BackoffRate: 2
+              IntervalSeconds: 1
+              MaxAttempts: 2
+              Comment: Retry Store thing
+        Catch:
+            - ErrorEquals:
+                  - States.ALL
+              Comment: Failed to Store Thing
+              Next: Rollback Activate Certificate
+        Next: Thing Created Success
+    Rollback Activate Certificate:
+        Type: Task
+        Next: Rollback Attach Policy To Certificate
+        Parameters:
+            CertificateId.$: $.certificateId
+            NewStatus: INACTIVE
+        Resource: arn:aws:states:::aws-sdk:iot:updateCertificate
+    Thing Created Success:
+        Type: Succeed
+    Failed To Register Thing:
+        Type: Fail

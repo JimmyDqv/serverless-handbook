@@ -1,0 +1,70 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Multi Region IoT Global Infrastructure
+
+Parameters:
+  Application:
+    Type: String
+    Description: Name of the application
+    Default: multi-region-iot
+  PrimaryRegion:
+    Type: String
+    Description: The primary region name
+    Default: eu-west-1
+  SecondaryRegion:
+    Type: String
+    Description: The secondary region name
+    Default: us-west-2
+
+Resources:
+  ##########################################################################
+  #  DynamoDB Data Tables
+  ##########################################################################
+  DeviceInventoryTable:
+    Type: AWS::DynamoDB::GlobalTable
+    Properties:
+      TableName: !Sub ${Application}-device-inventory
+      BillingMode: PAY_PER_REQUEST
+      Replicas:
+        - Region: !Ref PrimaryRegion
+        - Region: !Ref SecondaryRegion
+      StreamSpecification:
+        StreamViewType: NEW_IMAGE
+      AttributeDefinitions:
+        - AttributeName: ThingName
+          AttributeType: S
+      KeySchema:
+        - AttributeName: ThingName
+          KeyType: HASH
+
+  IoTDataTable:
+    Type: AWS::DynamoDB::GlobalTable
+    Properties:
+      TableName: !Sub ${Application}-data
+      BillingMode: PAY_PER_REQUEST
+      Replicas:
+        - Region: !Ref PrimaryRegion
+        - Region: !Ref SecondaryRegion
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+
+##########################################################################
+#  Outputs                                                               #
+##########################################################################
+Outputs:
+  DeviceInventoryTable:
+    Description: Name of the created Device Inventory Table
+    Value: !Ref DeviceInventoryTable
+  IoTDataTable:
+    Description: Name of the created IoT Data Table
+    Value: !Ref IoTDataTable

@@ -1,0 +1,29 @@
+Comment: Store Incoming IoT Data
+StartAt: Refine data
+States:
+    Refine data:
+        Type: Pass
+        Parameters:
+            Message.$: $.message
+            Device.$: $.device
+            TS.$: $.ts
+            Region.$: States.ArrayGetItem(States.StringSplit($$.StateMachine.Id,':'),3)
+        Next: Add Data Item
+    Add Data Item:
+        Type: Task
+        Resource: arn:aws:states:::dynamodb:putItem
+        Parameters:
+            TableName: ${DataTable}
+            Item:
+                PK:
+                    S.$: $.Device
+                SK:
+                    S.$: States.Format('{}',$.TS)
+                Device:
+                    S.$: $.Device
+                Region:
+                    S.$: $.Region
+                Message:
+                    S.$: $.Message
+        ResultPath: null
+        End: true

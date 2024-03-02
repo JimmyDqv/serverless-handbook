@@ -1,0 +1,37 @@
+version: 0.1
+eu-west-1:
+  global:
+    parameters:
+      stack_name: multi-region-iot-primary-region-infra
+      region: eu-west-1
+      confirm_changeset: false
+      capabilities: CAPABILITY_NAMED_IAM
+      resolve_s3: true
+      s3_prefix: multi-region-iot-primary-region-infra
+  deploy:
+    parameters:
+      parameter_overrides:
+        - Application=multi-region-iot
+        - IoTCoreEndpoint=<YOUR ENDPOINT HERE>
+        - ServerCertificateArn=<YOUR SERVER CERTIFICATE ARN HERE>
+        - DNSName=<YOUR DNS NAME>
+        - DeviceInventoryTable=multi-region-iot-device-inventory
+        - DeviceInventoryTableStreamArn=<DYNAMODB STREAM ARN>
+us-west-2:
+  global:
+    parameters:
+      stack_name: multi-region-iot-secondary-region-infra
+      region: us-west-2
+      confirm_changeset: false
+      capabilities: CAPABILITY_NAMED_IAM
+      resolve_s3: true
+      s3_prefix: multi-region-iot-primary-region-infra
+  deploy:
+    parameters:
+      parameter_overrides:
+        - Application=multi-region-iot
+        - IoTCoreEndpoint=<YOUR ENDPOINT HERE>
+        - ServerCertificateArn=<YOUR SERVER CERTIFICATE ARN HERE>
+        - DNSName=<YOUR DNS NAME>
+        - DeviceInventoryTable=multi-region-iot-device-inventory
+        - DeviceInventoryTableStreamArn=<DYNAMODB STREAM ARN>

@@ -1,0 +1,370 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: Multi Region IoT Regional Infrastructure
+
+Parameters:
+  Application:
+    Type: String
+    Description: Name of the application
+    Default: multi-region-iot
+  IoTCoreEndpoint:
+    Type: String
+    Description: Connection Endpoint for IoT Core
+  ServerCertificateArn:
+    Type: String
+    Description: ARN for the server certificate in ACM
+  HostedZoneId:
+    Type: String
+    Description: The IFD of the hosted zone
+  DNSName:
+    Type: String
+    Description: The Name of the DNS record
+  DeviceInventoryTable:
+    Type: String
+    Description: The Name of the DeviceInventoryTable
+  DeviceInventoryTableStreamArn:
+    Type: String
+    Description: The Name ARN to the DeviceInventoryTable DynamoDB Stream
+  DataTable:
+    Type: String
+    Description: The DynemoDB Table to Store data in
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 2048
+    Runtime: python3.9
+
+Resources:
+  ##########################################################################
+  # INFRASTRUCTURE                                                         #
+  ##########################################################################
+  LatencyBasedRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      ResourceRecords:
+        - !Ref IoTCoreEndpoint
+      SetIdentifier: !Ref AWS::Region
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DNSName
+      TTL: 60
+      Region: !Ref AWS::Region
+      Type: CNAME
+
+  ValidationCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref DNSName
+      DomainValidationOptions:
+        - DomainName: !Ref DNSName
+          HostedZoneId: !Ref HostedZoneId
+      ValidationMethod: DNS
+
+  IoTCoreDomainConfiguration:
+    Type: AWS::IoT::DomainConfiguration
+    Properties:
+      DomainConfigurationName: !Sub ${Application}-primary
+      DomainConfigurationStatus: ENABLED
+      DomainName: !Ref DNSName
+      ServerCertificateArns:
+        - !Ref ServerCertificateArn
+      ServiceType: DATA
+      TlsConfig:
+        SecurityPolicy: IotSecurityPolicy_TLS13_1_2_2022_10
+      ValidationCertificateArn: !Ref ValidationCertificate
+
+  JustInTimeRegistrationIoTRule:
+    Type: AWS::IoT::TopicRule
+    Properties:
+      TopicRulePayload:
+        AwsIotSqlVersion: 2016-03-23
+        RuleDisabled: false
+        Sql: SELECT * FROM '$aws/events/certificates/registered/#'
+        Actions:
+          - StepFunctions:
+              RoleArn: !GetAtt JustInTimeRegistrationIoTRuleRole.Arn
+              StateMachineName: !GetAtt JustInTimeRegistrationStateMachineStandard.Name
+
+  JustInTimeRegistrationIoTRuleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: iot.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeStateMachine
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Action:
+                - states:StartExecution
+              Effect: Allow
+              Resource:
+                - !Ref JustInTimeRegistrationStateMachineStandard
+
+  ReadCertificateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: JITRStateMachine/lambda/ReadCertificateData
+      Handler: data.handler
+
+  JustInTimeRegistrationStateMachineStandard:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: JITRStateMachine/jitr.asl.yaml
+      Tracing:
+        Enabled: true
+      DefinitionSubstitutions:
+        InventoryTable: !Ref DeviceInventoryTable
+        IoTPolicyName: !Ref IoTDeviceStandardPolicy
+        ReadCertificateFunctionArn: !GetAtt ReadCertificateFunction.Arn
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:*
+              Resource: "*"
+        - Statement:
+            - Effect: Allow
+              Action:
+                - iot:*
+              Resource: "*"
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ReadCertificateFunction
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DeviceInventoryTable
+
+  IoTDeviceStandardPolicy:
+    Type: AWS::IoT::Policy
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - iot:Connect
+            Resource:
+              - arn:aws:iot:*:*:client/${iot:Connection.Thing.ThingName}
+          - Effect: Allow
+            Action:
+              - iot:Publish
+            Resource:
+              - arn:aws:iot:*:*:topic/i/${iot:Connection.Thing.ThingName}/*
+          - Effect: Allow
+            Action:
+              - iot:Receive
+            Resource:
+              - arn:aws:iot:*:*:topic/e/${iot:Connection.Thing.ThingName}/*
+          - Effect: Allow
+            Action:
+              - iot:Subscribe
+            Resource:
+              - arn:aws:iot:*:*:topic/e/${iot:Connection.Thing.ThingName}/*
+      PolicyName: Iot-Device-Policy
+
+  # Event Bus (Target)
+  ServiceEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub ${Application}-${AWS::Region}-event-bus
+
+  # DLQ for Stream (Source)
+  DLQueue:
+    Type: AWS::SQS::Queue
+
+  EventBridgePipeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - pipes.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: ReadDynamoDB
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:DescribeStream
+                  - dynamodb:GetRecords
+                  - dynamodb:GetShardIterator
+                  - dynamodb:ListStreams
+                Resource: !Ref DeviceInventoryTableStreamArn
+        - PolicyName: WriteEventBridge
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - events:PutEvents
+                Resource: !GetAtt ServiceEventBus.Arn
+
+  # EventBridge Pipe
+  Pipe:
+    Type: AWS::Pipes::Pipe
+    Properties:
+      Name: !Sub ${Application}-deviceinventory-to-eventbridge
+      Description: Pipe to connect DeviceInventoryTable Stream to EventBridge event bus
+      RoleArn: !GetAtt EventBridgePipeRole.Arn
+      Source: !Ref DeviceInventoryTableStreamArn
+      SourceParameters:
+        DynamoDBStreamParameters:
+          StartingPosition: LATEST
+          BatchSize: 1
+      Target: !GetAtt ServiceEventBus.Arn
+      TargetParameters:
+        EventBridgeEventBusParameters:
+          DetailType: DeviceTableUpdate
+          Source: !Sub ${Application}.devices
+
+  GetCertificatePemFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: CopyDeviceStateMachine/lambda/GetCertificatePem
+      Handler: get-pem.handler
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - iot:*
+              Resource: "*"
+
+  CopyDeviceStateMachineStandard:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: CopyDeviceStateMachine/copy.asl.yaml
+      Tracing:
+        Enabled: true
+      DefinitionSubstitutions:
+        InventoryTable: !Ref DeviceInventoryTable
+        IoTPolicyName: !Ref IoTDeviceStandardPolicy
+        GetCertificatePemFunctionArn: !GetAtt GetCertificatePemFunction.Arn
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:*
+              Resource: "*"
+        - Statement:
+            - Effect: Allow
+              Action:
+                - iot:*
+              Resource: "*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DeviceInventoryTable
+        - LambdaInvokePolicy:
+            FunctionName: !Ref GetCertificatePemFunction
+      Events:
+        Delete:
+          Type: EventBridgeRule
+          Properties:
+            EventBusName: !Ref ServiceEventBus
+            InputPath: $.detail
+            Pattern:
+              source:
+                - !Sub ${Application}.devices
+              detail-type:
+                - DeviceTableUpdate
+
+  StoreDataIoTRule:
+    Type: AWS::IoT::TopicRule
+    Properties:
+      TopicRulePayload:
+        AwsIotSqlVersion: 2016-03-23
+        RuleDisabled: false
+        Sql: SELECT *, topic(2) as device, timestamp() as ts FROM 'i/#'
+        Actions:
+          - StepFunctions:
+              RoleArn: !GetAtt StoreDataIoTRuleRole.Arn
+              StateMachineName: !GetAtt StoreDataStateMachineStandard.Name
+
+  ##########################################################################
+  #  Test Resources
+  ##########################################################################
+  StoreDataIoTRuleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: iot.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeStateMachine
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Action:
+                - states:StartExecution
+              Effect: Allow
+              Resource:
+                - !Ref StoreDataStateMachineStandard
+
+  StoreDataStateMachineStandard:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: StoreMessagesStateMachine/store.asl.yaml
+      Tracing:
+        Enabled: true
+      DefinitionSubstitutions:
+        DataTable: !Ref DataTable
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:*
+              Resource: "*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DataTable
+
+  CertificateStoreBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      BucketName: !Sub ${Application}-certificate-store-${AWS::Region}
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Policies:
+        - PolicyName: AccessCertificateStoreBucket
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: s3:*
+                Resource: !Sub arn:aws:s3:::${CertificateStoreBucket}/*
+              - Effect: Allow
+                Action: s3:*
+                Resource: !Sub arn:aws:s3:::${CertificateStoreBucket}
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action: sts:AssumeRole
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref InstanceRole
