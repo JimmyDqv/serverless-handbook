@@ -1,4 +1,4 @@
-# Solution - A severless URL redirect
+# Solution - A serverless URL redirect
 
 ![Cover Image.](images/cover-image.png)
 

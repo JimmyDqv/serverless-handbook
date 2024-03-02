@@ -1,8 +1,8 @@
-# Solution - A Slack Channel Poster using StepFiunctions HTTP EndPOint
+# Solution - A Slack Channel Poster using StepFunctions HTTP EndPOint
 
 ![Cover Image.](images/cover-image.png)
 
-In this solution you will use StepFunctions HTTP EndPOint state to post a message to Slack.
+In this solution you will use StepFunctions HTTP EndPoint state to post a message to Slack.
 
 ## Cost
 
