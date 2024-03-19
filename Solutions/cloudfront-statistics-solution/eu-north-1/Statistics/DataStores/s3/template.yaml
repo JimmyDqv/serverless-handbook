@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: Serverless statistics S3 data store
+Parameters:
+  Application:
+    Type: String
+    Description: Name of owning application
+  StatisticsCommonStackName:
+    Type: String
+    Description: Name of Stack with the common infra
+
+Resources:
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      BucketName: !Sub ${Application}-statistics-data
+
+  StatisticsDataFirehose:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      DeliveryStreamName: !Sub ${Application}-statistics-firehose
+      DeliveryStreamType: DirectPut
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !GetAtt DataBucket.Arn
+        ProcessingConfiguration:
+          Enabled: True
+          Processors:
+            - Type: AppendDelimiterToRecord
+        BufferingHints:
+          IntervalInSeconds: 900
+          SizeInMBs: 25
+        ErrorOutputPrefix: errors
+        RoleARN: !GetAtt StatisticsDataFirehoseRole.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub ${Application}-statistics-firehose
+        - Key: Application
+          Value: !Ref Application
+
+  StatisticsDataFirehoseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - firehose.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: s3-statistics-data-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:*
+                Resource: !GetAtt DataBucket.Arn
+              - Effect: Allow
+                Action:
+                  - s3:*
+                Resource: !Sub ${DataBucket.Arn}/*
+
+  StatisticsDataEventsRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName:
+        Fn::ImportValue: !Sub ${StatisticsCommonStackName}:eventbridge-bus-name
+      EventPattern:
+        account:
+          - !Ref AWS::AccountId
+        source:
+          - com.serverless.statistics
+        detail-type:
+          - PageView
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt StatisticsDataFirehose.Arn
+          RoleArn: !GetAtt StatisticsDataEventsRole.Arn
+          Id: !Sub ${Application}-statistics-data-firehose
+          InputPath: $.detail
+
+  StatisticsDataEventsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: statistics-data-firehose
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - firehose:*
+                Resource: !GetAtt StatisticsDataFirehose.Arn

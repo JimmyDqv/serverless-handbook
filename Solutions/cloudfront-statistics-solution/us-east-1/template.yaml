@@ -1,0 +1,44 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: CloudFront Data Ingestion
+Parameters:
+  ApplicationName:
+    Type: String
+    Description: Name of owning application
+  StateMachineArn:
+    Type: String
+    Description: StateMachine ARN
+
+Resources:
+  DataIngestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Timeout: 5
+      MemorySize: 1024
+      Runtime: python3.9
+      AutoPublishAlias: "true"
+      CodeUri: DataIngest
+      Handler: handler.handler
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - edgelambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            Action:
+              - states:StartExecution
+            Effect: Allow
+            Resource: !Ref StateMachineArn
+        - Version: "2012-10-17"
+          Statement:
+            Action:
+              - lambda:GetFunction
+            Effect: Allow
+            Resource: "*"

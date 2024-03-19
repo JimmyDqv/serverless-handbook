@@ -1,0 +1,15 @@
+version: 0.1
+default:
+  global:
+    parameters:
+      stack_name: serverless-statistics-data-store-s3
+      region: eu-north-1
+      confirm_changeset: false
+      capabilities: CAPABILITY_NAMED_IAM
+      s3_prefix: serverless-statistics-data-store-s3
+      resolve_s3: true
+  deploy:
+    parameters:
+      parameter_overrides:
+        - Application=
+        - StatisticsCommonStackName=serverless-statistics-common

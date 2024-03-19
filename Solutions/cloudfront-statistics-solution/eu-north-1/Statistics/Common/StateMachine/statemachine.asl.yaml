@@ -1,0 +1,92 @@
+Comment: Data statistics Ingestion
+StartAt: Parse Data
+States:
+    Parse Data:
+        Type: Pass
+        Parameters:
+            CloudFront-Is-Mobile-Viewer.$: $.cf.request.headers.cloudfront-is-mobile-viewer[0].value
+            CloudFront-Is-Tablet-Viewer.$: $.cf.request.headers.cloudfront-is-tablet-viewer[0].value
+            CloudFront-Is-Desktop-Viewer.$: $.cf.request.headers.cloudfront-is-desktop-viewer[0].value
+            Cloudfront-Viewer-Country.$: $.cf.request.headers.cloudfront-viewer-country[0].value
+            Cloudfront-Viewer-Country-Name.$: $.cf.request.headers.cloudfront-viewer-country-name[0].value
+            Page.$: $.cf.request.uri
+            AccessTime.$: $$.Execution.StartTime
+        Next: Split Date Time
+    Split Date Time:
+        Type: Pass
+        Parameters:
+            Date.$: States.ArrayGetItem(States.StringSplit($.AccessTime,'T'),0)
+            Time.$: >-
+                States.Format('{}:00:00',States.ArrayGetItem(States.StringSplit(States.ArrayGetItem(States.StringSplit($.AccessTime,'T'),1),':'),0))
+        ResultPath: $.ParsedTimeAndDate
+        Next: Choice
+    Choice:
+        Type: Choice
+        Choices:
+            - Variable: $.CloudFront-Is-Desktop-Viewer
+              StringEquals: "true"
+              Comment: Set Viewer Desktop
+              Next: Set Viewer Desktop
+            - Variable: $.CloudFront-Is-Mobile-Viewer
+              StringEquals: "true"
+              Comment: Set Viewer Mobile
+              Next: Set Viewer Mobile
+            - Variable: $.CloudFront-Is-Tablet-Viewer
+              StringEquals: "true"
+              Comment: Set Viewer Tablet
+              Next: Set Viewer Tablet
+        Default: Set Viewer Unknown
+    Set Viewer Unknown:
+        Type: Pass
+        Next: Create Data Json
+        Parameters:
+            Viewer: Unknown
+        ResultPath: $.ParsedViewerType
+    Set Viewer Mobile:
+        Type: Pass
+        Next: Create Data Json
+        Parameters:
+            Viewer: Mobile
+        ResultPath: $.ParsedViewerType
+    Set Viewer Tablet:
+        Type: Pass
+        Next: Create Data Json
+        Parameters:
+            Viewer: Tablet
+        ResultPath: $.ParsedViewerType
+    Set Viewer Desktop:
+        Type: Pass
+        Next: Create Data Json
+        Parameters:
+            Viewer: Desktop
+        ResultPath: $.ParsedViewerType
+    Create Data Json:
+        Type: Pass
+        Next: EventBridge PutEvents
+        Parameters:
+            DataVersion: "2"
+            CloudFront-Is-Mobile-Viewer.$: $.CloudFront-Is-Mobile-Viewer
+            CloudFront-Is-Tablet-Viewer.$: $.CloudFront-Is-Tablet-Viewer
+            CloudFront-Is-Desktop-Viewer.$: $.CloudFront-Is-Desktop-Viewer
+            Cloudfront-Viewer-Country.$: $.Cloudfront-Viewer-Country
+            Cloudfront-Viewer-Country-Name.$: $.Cloudfront-Viewer-Country-Name
+            Page.$: $.Page
+            AccessTime.$: $.AccessTime
+            CountryCode.$: $.Cloudfront-Viewer-Country
+            CountryName.$: $.Cloudfront-Viewer-Country-Name
+            Viewer.$: $.ParsedViewerType.Viewer
+            UTCViewDateTime.$: >-
+                States.Format('{} {} UTC', $.ParsedTimeAndDate.Date,
+                $.ParsedTimeAndDate.Time)
+            ViewDate.$: $.ParsedTimeAndDate.Date
+            ViewTime.$: $.ParsedTimeAndDate.Time
+    EventBridge PutEvents:
+        Type: Task
+        Resource: arn:aws:states:::events:putEvents
+        Parameters:
+            Entries:
+                - Source: com.serverless.statistics
+                  DetailType: PageView
+                  Detail.$: $
+                  EventBusName: ${EventBridgeBusName}
+        End: True
