@@ -1,4 +1,4 @@
-# Solution - A Slack Channel Poster using StepFiunctions HTTP EndPOint
+# Solution - A Slack Channel Poster using StepFunctions HTTP EndPoint
 
 ![Cover Image.](images/cover-image.png)
 
