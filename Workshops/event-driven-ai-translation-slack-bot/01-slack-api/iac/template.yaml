@@ -1,0 +1,68 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Event-driven Slack Bot API Endpoint
+
+Parameters:
+  Application:
+    Type: String
+    Description: Name of the application
+  CommonInfraStackName:
+    Type: String
+    Description: Name of the Common Infra Stack
+
+Globals:
+  Function:
+    Runtime: python3.9
+    Timeout: 30
+    MemorySize: 1024
+
+Resources:
+  ##########################################################################
+  #  WEBHOOK INFRASTRUCTURE                                                #
+  ##########################################################################
+
+  ##########################################################################
+  #  WebHook HTTP                                                          #
+  ##########################################################################
+  SlackHookHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowMethods:
+          - GET
+        AllowOrigins:
+          - "*"
+        AllowHeaders:
+          - "*"
+
+  ##########################################################################
+  #  HTTP API Slackhook Lambda Function                                    #
+  ##########################################################################
+  SlackhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: slackhook.handler
+      Events:
+        SackhookPost:
+          Type: HttpApi
+          Properties:
+            Path: /slackhook
+            Method: post
+            ApiId: !Ref SlackHookHttpApi
+      Policies:
+        - EventBridgePutEventsPolicy:
+            EventBusName:
+              Fn::ImportValue: !Sub ${CommonInfraStackName}:EventBridgeBus
+      Environment:
+        Variables:
+          EVENT_BUS_NAME:
+            Fn::ImportValue: !Sub ${CommonInfraStackName}:EventBridgeBus
+
+##########################################################################
+#  Outputs                                                               #
+##########################################################################
+Outputs:
+  ApiEndpoint:
+    Description: HTTP API endpoint URL
+    Value: !Sub https://${SlackHookHttpApi}.execute-api.${AWS::Region}.amazonaws.com

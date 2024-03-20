@@ -1,0 +1,63 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: Generate Voice State Machine
+Parameters:
+  Application:
+    Type: String
+    Description: Name of owning application
+  CommonInfraStackName:
+    Type: String
+    Description: Name of the Common Infra Stack
+
+Resources:
+  ##########################################################################
+  ## VOICE STATEMACHINE
+  ##########################################################################
+  VoiceStateMachineStandard:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: statemachine/voice.asl.yaml
+      Tracing:
+        Enabled: true
+      DefinitionSubstitutions:
+        S3Bucket:
+          Fn::ImportValue: !Sub ${CommonInfraStackName}:TranslationBucket
+        EventBridgeBusName:
+          Fn::ImportValue: !Sub ${CommonInfraStackName}:EventBridgeBus
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:*
+              Resource: "*"
+        - Statement:
+            - Effect: Allow
+              Action:
+                - polly:StartSpeechSynthesisTask
+                - polly:GetSpeechSynthesisTask
+              Resource: "*"
+        - S3CrudPolicy:
+            BucketName:
+              Fn::ImportValue: !Sub ${CommonInfraStackName}:TranslationBucket
+        - EventBridgePutEventsPolicy:
+            EventBusName:
+              Fn::ImportValue: !Sub ${CommonInfraStackName}:EventBridgeBus
+      Events:
+        StateChange:
+          Type: EventBridgeRule
+          Properties:
+            EventBusName: default
+            InputPath: $.detail
+            Pattern:
+              source:
+                - aws.s3
+              detail-type:
+                - Object Created
+              detail:
+                bucket:
+                  name:
+                    - Fn::ImportValue: !Sub ${CommonInfraStackName}:TranslationBucket
+                object:
+                  key:
+                    - suffix: ".txt"
+      Type: STANDARD

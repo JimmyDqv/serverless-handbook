@@ -1,0 +1,89 @@
+Comment: Convert text to voice.
+StartAt: Set Source Information
+States:
+    Set Source Information:
+        Type: Pass
+        ResultPath: $
+        Parameters:
+            TargetBucket.$: $.bucket.name
+            Targetkey.$: States.Format('{}/{}/voice',States.ArrayGetItem(States.StringSplit($.object.key,'/'),0),States.ArrayGetItem(States.StringSplit($.object.key,'/'),1))
+            SourceBucket.$: $.bucket.name
+            SourceKey.$: $.object.key
+            Langaguge.$: States.Format('{}',States.ArrayGetItem(States.StringSplit($.object.key,'/'),1))
+        Next: Load Text
+    Load Text:
+        Type: Task
+        Next: Start Speech Synthesis
+        Parameters:
+            Bucket.$: $.SourceBucket
+            Key.$: $.SourceKey
+        Resource: arn:aws:states:::aws-sdk:s3:getObject
+        ResultPath: $.Text
+        ResultSelector:
+            Body.$: $.Body
+    Start Speech Synthesis:
+        Type: Task
+        Parameters:
+            Engine: neural
+            LanguageCode.$: $.Langaguge
+            OutputFormat: mp3
+            OutputS3BucketName.$: $.TargetBucket
+            OutputS3KeyPrefix.$: $.Targetkey
+            TextType: text
+            Text.$: $.Text.Body
+            VoiceId: Joanna
+        Resource: arn:aws:states:::aws-sdk:polly:startSpeechSynthesisTask
+        ResultPath: $.Voice
+        Next: Get Speech Synthesis Status
+    Get Speech Synthesis Status:
+        Type: Task
+        Parameters:
+            TaskId.$: $.Voice.SynthesisTask.TaskId
+        Resource: arn:aws:states:::aws-sdk:polly:getSpeechSynthesisTask
+        ResultPath: $.Voice
+        Next: Speech Synthesis Done?
+    Speech Synthesis Done?:
+        Type: Choice
+        Choices:
+            - Variable: $.Voice.SynthesisTask.TaskStatus
+              StringMatches: completed
+              Next: Update Voice Object
+              Comment: Completed!
+            - Variable: $.Voice.SynthesisTask.TaskStatus
+              StringMatches: failed
+              Next: Failed
+              Comment: Failed!
+        Default: Wait
+    Update Voice Object:
+        Type: Task
+        Next: Notify
+        ResultPath: null
+        Parameters:
+            Bucket.$: $.TargetBucket
+            CopySource.$: $.Voice.SynthesisTask.OutputUri
+            Key.$: States.Format('{}_{}.mp3',$.Targetkey,$.Voice.SynthesisTask.VoiceId)
+        Resource: arn:aws:states:::aws-sdk:s3:copyObject
+    Notify:
+        Type: Task
+        Resource: arn:aws:states:::events:putEvents
+        Next: Completed
+        Parameters:
+            Entries:
+                - Source: Translation
+                  DetailType: VoiceGenerated
+                  Detail:
+                      VoiceBucket.$: $.TargetBucket
+                      VoiceKey.$: States.Format('{}_{}.mp3',$.Targetkey,$.Voice.SynthesisTask.VoiceId)
+                      Language.$: $.Langaguge
+                      Voice.$: $.Voice.SynthesisTask.VoiceId
+                  EventBusName: ${EventBridgeBusName}
+    Completed:
+        Type: Pass
+        End: true
+    Failed:
+        Type: Pass
+        End: true
+    Wait:
+        Type: Wait
+        Seconds: 10
+        Next: Get Speech Synthesis Status

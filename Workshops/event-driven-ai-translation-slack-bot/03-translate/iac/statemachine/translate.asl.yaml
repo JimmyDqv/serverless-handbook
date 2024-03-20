@@ -1,0 +1,51 @@
+Comment: Translation State Machine
+StartAt: Debug
+States:
+    Debug:
+        Type: Pass
+        Next: Map
+    Map:
+        Type: Map
+        ItemProcessor:
+            ProcessorConfig:
+                Mode: INLINE
+            StartAt: Translate Text
+            States:
+                Translate Text:
+                    Type: Task
+                    Parameters:
+                        SourceLanguageCode: auto
+                        TargetLanguageCode.$: $.TargetLanguage
+                        Text.$: $.Text
+                    Resource: arn:aws:states:::aws-sdk:translate:translateText
+                    ResultPath: $.Translation
+                    Next: Store Translated Text
+                Store Translated Text:
+                    Type: Task
+                    Parameters:
+                        Body.$: $.Translation.TranslatedText
+                        Bucket: ${S3Bucket}
+                        Key.$: States.Format('{}/{}/text.txt',$.RequestId, $.TargetLanguage)
+                    Resource: arn:aws:states:::aws-sdk:s3:putObject
+                    ResultPath: null
+                    Next: Notify
+                Notify:
+                    Type: Task
+                    Resource: arn:aws:states:::events:putEvents
+                    Parameters:
+                        Entries:
+                            - Source: Translation
+                              DetailType: TextTranslated
+                              Detail:
+                                  TextBucket: ${S3Bucket}
+                                  TextKey.$: States.Format('{}/{}/text.txt',$.RequestId, $.TargetLanguage)
+                                  Language.$: $.TargetLanguage
+                                  RequestId.$: $.RequestId
+                              EventBusName: ${EventBridgeBusName}
+                    End: true
+        End: true
+        ItemsPath: $.Languages
+        ItemSelector:
+            TargetLanguage.$: $$.Map.Item.Value.Code
+            RequestId.$: $.RequestId
+            Text.$: $.Text

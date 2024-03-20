@@ -1,0 +1,118 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Event-driven Slack Bot Notification Service
+
+Parameters:
+  Application:
+    Type: String
+    Description: Name of the application
+  CommonInfraStackName:
+    Type: String
+    Description: Name of the Common Infra Stack
+  SlackChannel:
+    Type: String
+    Description: The Slack Channel to post to
+
+Globals:
+  Function:
+    Runtime: python3.9
+    Timeout: 30
+    MemorySize: 1024
+
+Resources:
+  ##########################################################################
+  #   LAMBDA FUNCTIONS                                                     #
+  ##########################################################################
+  PostToChannelFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/SlackPostToChannel
+      Handler: postchannel.handler
+      Policies:
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn:
+              Fn::ImportValue: !Sub ${CommonInfraStackName}:SlackBotSecret
+      Environment:
+        Variables:
+          SLACK_CHANNEL: !Ref SlackChannel
+          SLACK_BOT_TOKEN_ARN:
+            Fn::ImportValue: !Sub ${CommonInfraStackName}:SlackBotSecret
+
+  UploadAudioToChannelFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/UploadAudioToChannel
+      Handler: uploadchannel.handler
+      Policies:
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn:
+              Fn::ImportValue: !Sub ${CommonInfraStackName}:SlackBotSecret
+        - S3ReadPolicy:
+            BucketName:
+              Fn::ImportValue: !Sub ${CommonInfraStackName}:TranslationBucket
+      Environment:
+        Variables:
+          SLACK_CHANNEL: !Ref SlackChannel
+          SLACK_BOT_TOKEN_ARN:
+            Fn::ImportValue: !Sub ${CommonInfraStackName}:SlackBotSecret
+
+  ##########################################################################
+  #   STEPFUNCTION                                                         #
+  ##########################################################################
+  NotificationLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "${Application}/notificationstatemachine"
+      RetentionInDays: 5
+
+  SlackNotificationStateMachineStandard:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: statemachine/statemachine.asl.yaml
+      DefinitionSubstitutions:
+        EventBridgeName:
+          Fn::ImportValue: !Sub ${CommonInfraStackName}:EventBridgeBus
+        PostToChannelFunctionArn: !GetAtt PostToChannelFunction.Arn
+        UploadAudioToChannelFunctionArn: !GetAtt UploadAudioToChannelFunction.Arn
+      Events:
+        SlackNotification:
+          Type: EventBridgeRule
+          Properties:
+            EventBusName:
+              Fn::ImportValue: !Sub ${CommonInfraStackName}:EventBridgeBus
+            Pattern:
+              source:
+                - Translation
+              detail-type:
+                - TextTranslated
+                - VoiceGenerated
+            RetryPolicy:
+              MaximumEventAgeInSeconds: 300
+              MaximumRetryAttempts: 2
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - "cloudwatch:*"
+                - "logs:*"
+              Resource: "*"
+        - EventBridgePutEventsPolicy:
+            EventBusName:
+              Fn::ImportValue: !Sub ${CommonInfraStackName}:EventBridgeBus
+        - LambdaInvokePolicy:
+            FunctionName: !Ref PostToChannelFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref UploadAudioToChannelFunction
+        - S3ReadPolicy:
+            BucketName:
+              Fn::ImportValue: !Sub ${CommonInfraStackName}:TranslationBucket
+      Tracing:
+        Enabled: true
+      Logging:
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt NotificationLogGroup.Arn
+        IncludeExecutionData: true
+        Level: ALL
+      Type: STANDARD

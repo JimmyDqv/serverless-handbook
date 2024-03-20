@@ -1,0 +1,15 @@
+version: 0.1
+default:
+  global:
+    parameters:
+      stack_name: event-driven-lab-slack-api
+      region: eu-west-1
+      resolve_s3: true
+      confirm_changeset: false
+      fail_on_empty_changeset: false
+      capabilities: CAPABILITY_NAMED_IAM
+  deploy:
+    parameters:
+      parameter_overrides:
+        - Application=event-driven-lab
+        - CommonInfraStackName=event-driven-lab-common-infra

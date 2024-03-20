@@ -1,0 +1,57 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: Translate Text State Machine
+Parameters:
+  Application:
+    Type: String
+    Description: Name of owning application
+  CommonInfraStackName:
+    Type: String
+    Description: Name of the Common Infra Stack
+
+Resources:
+  ##########################################################################
+  ## TRANSLATE STATEMACHINE
+  ##########################################################################
+  TranslateStateMachineStandard:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: statemachine/translate.asl.yaml
+      Tracing:
+        Enabled: true
+      DefinitionSubstitutions:
+        S3Bucket:
+          Fn::ImportValue: !Sub ${CommonInfraStackName}:TranslationBucket
+        EventBridgeBusName:
+          Fn::ImportValue: !Sub ${CommonInfraStackName}:EventBridgeBus
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:*
+              Resource: "*"
+        - Statement:
+            - Effect: Allow
+              Action:
+                - translate:TranslateText
+                - comprehend:DetectDominantLanguage
+              Resource: "*"
+        - S3WritePolicy:
+            BucketName:
+              Fn::ImportValue: !Sub ${CommonInfraStackName}:TranslationBucket
+        - EventBridgePutEventsPolicy:
+            EventBusName:
+              Fn::ImportValue: !Sub ${CommonInfraStackName}:EventBridgeBus
+      Events:
+        StateChange:
+          Type: EventBridgeRule
+          Properties:
+            InputPath: $.detail
+            EventBusName:
+              Fn::ImportValue: !Sub ${CommonInfraStackName}:EventBridgeBus
+            Pattern:
+              source:
+                - Translation
+              detail-type:
+                - TranslateText
+      Type: STANDARD

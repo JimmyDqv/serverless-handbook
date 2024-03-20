@@ -1,0 +1,62 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Event-Driven Translation Common Infra
+Parameters:
+  Application:
+    Type: String
+    Description: Name of owning application
+  BucketSuffix:
+    Type: String
+    Description: Suffix to add to the S3 bucket, making the name unique
+
+Resources:
+  ##########################################################################
+  #   INFRASTRUCTURE
+  ##########################################################################
+  TranslationBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      BucketName: !Sub ${Application}-translation-bucket-${BucketSuffix}
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+
+  EventBridgeBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub ${Application}-eventbus
+
+  SlackBotSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Slack bot oauth token
+      Name: /slackbot
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+
+##########################################################################
+#  Outputs                                                               #
+##########################################################################
+Outputs:
+  TranslationBucket:
+    Description: Name of the bucket to store translations in
+    Value: !Ref TranslationBucket
+    Export:
+      Name: !Sub ${AWS::StackName}:TranslationBucket
+  EventBridgeBus:
+    Description: The EventBridge EventBus
+    Value: !Ref EventBridgeBus
+    Export:
+      Name: !Sub ${AWS::StackName}:EventBridgeBus
+  SlackBotSecret:
+    Description: The Slack Bot Secret
+    Value: !Ref SlackBotSecret
+    Export:
+      Name: !Sub ${AWS::StackName}:SlackBotSecret

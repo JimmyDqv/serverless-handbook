@@ -1,0 +1,82 @@
+Comment: Translate App Slack Notification service
+StartAt: Debug
+States:
+    Debug:
+        Type: Pass
+        Next: Event Type ?
+    Event Type ?:
+        Type: Choice
+        Choices:
+            - Variable: $.detail-type
+              StringEquals: TextTranslated
+              Next: Text Translated
+            - Variable: $.detail-type
+              StringEquals: VoiceGenerated
+              Next: Voice Generated
+        Default: Unknown Event Type
+    Text Translated:
+        Type: Pass
+        Next: GetObject
+        ResultPath: $
+        Parameters:
+            TextBucket.$: $.detail.TextBucket
+            TextKey.$: $.detail.TextKey
+            Language.$: $.detail.Language
+            RequestId.$: $.detail.RequestId
+    GetObject:
+        Type: Task
+        Parameters:
+            Bucket.$: $.TextBucket
+            Key.$: $.TextKey
+        Resource: arn:aws:states:::aws-sdk:s3:getObject
+        ResultSelector:
+            Body.$: $.Body
+        ResultPath: $.Text
+        Next: Post Text To Channel
+    Post Text To Channel:
+        Type: Task
+        Resource: arn:aws:states:::lambda:invoke
+        OutputPath: $.Payload
+        Parameters:
+            Payload.$: $
+            FunctionName: ${PostToChannelFunctionArn}
+        Retry:
+            - ErrorEquals:
+                  - Lambda.ServiceException
+                  - Lambda.AWSLambdaException
+                  - Lambda.SdkClientException
+                  - Lambda.TooManyRequestsException
+              IntervalSeconds: 1
+              MaxAttempts: 3
+              BackoffRate: 2
+        Next: Done
+    Done:
+        Type: Succeed
+    Voice Generated:
+        Type: Pass
+        ResultPath: $
+        Parameters:
+            VoiceBucket.$: $.detail.VoiceBucket
+            VoiceKey.$: $.detail.VoiceKey
+            Language.$: $.detail.Language
+            Voice.$: $.detail.Voice
+        Next: Upload Audio To Channel
+    Upload Audio To Channel:
+        Type: Task
+        Resource: arn:aws:states:::lambda:invoke
+        OutputPath: $.Payload
+        Parameters:
+            Payload.$: $
+            FunctionName: ${UploadAudioToChannelFunctionArn}
+        Retry:
+            - ErrorEquals:
+                  - Lambda.ServiceException
+                  - Lambda.AWSLambdaException
+                  - Lambda.SdkClientException
+                  - Lambda.TooManyRequestsException
+              IntervalSeconds: 1
+              MaxAttempts: 3
+              BackoffRate: 2
+        Next: Done
+    Unknown Event Type:
+        Type: Fail
