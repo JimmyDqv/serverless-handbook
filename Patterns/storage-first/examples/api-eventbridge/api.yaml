@@ -1,0 +1,23 @@
+openapi: "3.0.1"
+info:
+  title: "HTTP API to EventBridge"
+paths:
+  /data:
+    post:
+      responses:
+        default:
+          description: "API to EventBridge"
+      x-amazon-apigateway-integration:
+        integrationSubtype: "EventBridge-PutEvents"
+        credentials:
+          Fn::GetAtt: [HttpApiRole, Arn]
+        requestParameters:
+          Detail: "$request.body"
+          DetailType: MyDetailType
+          Source: MySource
+          EventBusName:
+            Fn::GetAtt: [EventBridge, Name]
+        payloadFormatVersion: "1.0"
+        type: "aws_proxy"
+        connectionType: "INTERNET"
+x-amazon-apigateway-importexport-version: "1.0"

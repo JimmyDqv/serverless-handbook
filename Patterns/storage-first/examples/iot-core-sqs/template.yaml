@@ -1,0 +1,54 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: Storage First IoT to SQS - Data Ingress
+
+Resources:
+  IotDataIngressSQS:
+    Type: AWS::SQS::Queue
+    Properties:
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt IotDataIngressSQSDLQ.Arn
+        maxReceiveCount: 5
+      VisibilityTimeout: 30
+
+  IotDataIngressSQSDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 30
+
+  IoTEventIngressToSQSRule:
+    Type: AWS::IoT::TopicRule
+    Properties:
+      RuleName: data_ingress
+      TopicRulePayload:
+        Actions:
+          - Sqs:
+              QueueUrl: !Ref IotDataIngressSQS
+              RoleArn: !GetAtt IotDataIngressSQSRole.Arn
+              UseBase64: False
+        AwsIotSqlVersion: 2016-03-23
+        Description: Get the data from IoT
+        RuleDisabled: false
+        Sql: SELECT *, timestamp() as ts FROM 'myTopic/#'
+
+  IotDataIngressSQSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - iot.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: sqs
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:*
+                Resource: !GetAtt IotDataIngressSQS.Arn

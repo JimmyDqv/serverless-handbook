@@ -1,0 +1,10 @@
+version: 0.1
+default:
+  deploy:
+    parameters:
+      stack_name: storage-first-api-to-sqs
+      region: eu-north-1
+      confirm_changeset: false
+      capabilities: CAPABILITY_NAMED_IAM
+      s3_prefix: storage-first-api-to-sqs
+      resolve_s3: true

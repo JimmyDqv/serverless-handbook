@@ -1,0 +1,78 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: HTTP API to SQS with Lambda Processor
+
+Resources:
+  SqsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: ProcessingQueue
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt SqsDLQ.Arn
+        maxReceiveCount: 5
+
+  SqsDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: ProcessingDLQ
+
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      DefinitionBody:
+        "Fn::Transform":
+          Name: "AWS::Include"
+          Parameters:
+            Location: "api.yaml"
+
+  ProcessingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Lambda function to process messages in the queue
+      CodeUri: src
+      Handler: handler.handler
+      Runtime: python3.9
+      Timeout: 5
+      MemorySize: 1024
+      Events:
+        MySQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt SqsQueue.Arn
+            BatchSize: 1
+
+  HttpApiRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      Policies:
+        - PolicyName: AllowSqs
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "sqs:SendMessage"
+                  - "sqs:GetQueueUrl"
+                  - "sqs:SendMessageBatch"
+                Resource: !GetAtt SqsQueue.Arn
+
+  DataTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: data-table
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
