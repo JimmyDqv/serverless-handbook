@@ -1,0 +1,67 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Retry with Exponential Back off and Jitter for SQS and Lambda
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 1024
+    Runtime: python3.12
+
+Resources:
+  WorkerSqsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: WorkerSqsQueue
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt RetrySqsQueue.Arn
+        maxReceiveCount: 1
+
+  RetrySqsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: RetrySqsQueue
+
+
+  DLQSqsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: DLQSqsQueue
+
+  SQSRetryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: SQSRetryFunction
+      Description: Lambda function responsible for the retry logic
+      CodeUri: src/
+      Handler: retry.handler
+      Environment:
+        Variables:
+          QUEUE: !Ref WorkerSqsQueue
+          DLQ_QUEUE: !Ref DLQSqsQueue
+          RETRY_LIMIT: 3
+      Policies:
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt WorkerSqsQueue.QueueName
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt DLQSqsQueue.QueueName
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt RetrySqsQueue.Arn
+            BatchSize: 1
+
+  SQSWorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: SQSWorkerFunction
+      Description: Worker Lambda to be invoked by the SQS Queue
+      CodeUri: src/
+      Handler: worker.handler
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt WorkerSqsQueue.Arn
+            BatchSize: 1

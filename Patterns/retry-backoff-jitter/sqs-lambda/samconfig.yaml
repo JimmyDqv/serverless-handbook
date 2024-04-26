@@ -1,0 +1,10 @@
+version: 0.1
+default:
+  deploy:
+    parameters:
+      stack_name: sqs-lambda-retry-backoff-jitter
+      region: eu-west-1
+      confirm_changeset: false
+      capabilities: CAPABILITY_NAMED_IAM
+      s3_prefix: sqs-lambda-retry-backoff-jitter
+      resolve_s3: true
