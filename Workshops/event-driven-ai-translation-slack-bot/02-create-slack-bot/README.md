@@ -65,7 +65,9 @@ Select the "/slackbot" secret and create a key/value pair with the key "OauthTok
 
 ### Add app to channel
 
-Final step. Navigate to your workspace, find the Translation app under Apps in the left pane, click it and select "Add this app to a channel" and select the channel of your choice. Remember the channel name, you will need it in [notification part](../04-notification/)
+Final step. Navigate to your workspace, find the Translation app under Apps in the left pane, click it and select "Add this app to a channel" and select the channel of your choice.
+
+In [notification part](../04-notification/) you will need the Slack channel ID. You get that by right clicking on the channel, select `Copy` and `Copy Link`. The ID is the last part of the link.
 
 ![Image showing adding the app to a channel](images/slack-add-app-to-channel.png)
 

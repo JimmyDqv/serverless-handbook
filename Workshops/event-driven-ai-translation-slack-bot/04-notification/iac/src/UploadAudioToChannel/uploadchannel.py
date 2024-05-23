@@ -28,8 +28,9 @@ def download_audio_file(bucket, key, voice, language):
 
 def upload_audio_file(language, path):
     client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
-    client.files_upload(
-        channels="#" + SLACK_CHANNEL,
+    client.files_upload_v2(
+        channel=SLACK_CHANNEL,
+        title="Polly Voiced Translation",
         initial_comment=f"Polly Voiced Translation for: {language}",
         file=path,
     )

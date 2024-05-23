@@ -14,7 +14,7 @@ def handler(event, context):
     text = f"{event['Language']}:\n{event['Text']['Body']}"
 
     client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
-    client.chat_postMessage(channel="#" + SLACK_CHANNEL, text=text)
+    client.chat_postMessage(channel=SLACK_CHANNEL, text=text)
 
     return {"statusCode": 200, "body": "Hello there"}
 
