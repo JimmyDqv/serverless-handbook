@@ -39,6 +39,6 @@ In the edit view, inspect each state by selecting it. Pay attention to the confi
 ## Test it
 
 From the Slack channel that you have created run this command to start a translation: '/translate "Hello! How are you? This is an automatic translation." sv-SE, fr-FR'
-This should, if everything is correctly setup, create a translation back to the channel.
+This should, if everything is correctly setup, show a message like below.
 
 ![Image showing the test result](images/test-result.png)
