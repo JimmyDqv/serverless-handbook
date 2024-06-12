@@ -1,0 +1,34 @@
+Comment: User service - User Signup Hook State Machine
+StartAt: Debug
+States:
+  Debug:
+    Type: Pass
+    Next: Create User
+  Create User:
+    Type: Task
+    Resource: arn:aws:states:::dynamodb:putItem
+    Parameters:
+      TableName: ${UserTable}
+      Item:
+        userid:
+          S.$: $.detail.data.userName
+        name:
+          S.$: $.detail.data.name
+        email:
+          S.$: $.detail.data.email
+        status:
+          S.$: $.detail.data.status
+        verified:
+          S.$: $.detail.data.verified
+    ResultPath: null
+    Next: Post Event
+  Post Event:
+    Type: Task
+    Resource: arn:aws:states:::events:putEvents
+    Parameters:
+      Entries:
+        - Source: ${ApplicationName}.user
+          DetailType: created
+          Detail.$: $
+          EventBusName: ${EventBridgeBusName}
+    End: true

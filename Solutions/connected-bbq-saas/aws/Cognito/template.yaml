@@ -1,0 +1,111 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: Connected BBQ Application User Pool and Client used for Authentication
+Parameters:
+  ApplicationName:
+    Type: String
+    Description: The application that owns this setup.
+  HostedAuthDomainPrefix:
+    Type: String
+    Description: The domain prefix to use for the UserPool hosted UI <HostedAuthDomainPrefix>.auth.[region].amazoncognito.com
+  CommonStackName:
+    Type: String
+    Description: The name of the common stack that contains the EventBridge Bus and more
+
+Globals:
+  Function:
+    Timeout: 10
+    MemorySize: 1024
+    Runtime: python3.11
+
+Resources:
+  PostSignUpHook:
+    Type: AWS::Serverless::Function
+    Properties:
+      AutoPublishAlias: "true"
+      CodeUri: ./PostSignUpLambda
+      Handler: hook.handler
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - EventBridgePutEventsPolicy:
+            EventBusName: 
+              Fn::ImportValue: !Sub ${CommonStackName}:eventbridge-bus-name
+      Environment:
+        Variables:
+          EventBusName: 
+            Fn::ImportValue: !Sub ${CommonStackName}:eventbridge-bus-name
+          ApplicationName: !Ref ApplicationName
+
+  PostSignUpHookPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt PostSignUpHook.Arn
+      Principal: cognito-idp.amazonaws.com
+
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub ${ApplicationName}-user-pool
+      UsernameConfiguration:
+        CaseSensitive: false
+      UsernameAttributes:
+        - "email"
+      AutoVerifiedAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: "verified_email"
+            Priority: 1
+          - Name: "verified_phone_number"
+            Priority: 2
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: false
+          Required: true
+        - Name: name
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+        - Name: tenant
+          AttributeDataType: String
+          DeveloperOnlyAttribute: true
+          Mutable: true
+          Required: false
+      LambdaConfig:
+        PostConfirmation: !GetAtt PostSignUpHook.Arn
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      GenerateSecret: False
+      AllowedOAuthFlowsUserPoolClient: true
+      CallbackURLs:
+        - http://localhost:3000
+      AllowedOAuthFlows:
+        - code
+        - implicit
+      AllowedOAuthScopes:
+        - phone
+        - email
+        - openid
+        - profile
+      SupportedIdentityProviders:
+        - COGNITO

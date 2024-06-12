@@ -1,0 +1,71 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: Connected BBQ Application User Service
+Parameters:
+  ApplicationName:
+    Type: String
+    Description: Name of owning application
+    Default: bbq-iot
+  CommonStackName:
+    Type: String
+    Description: The name of the common stack that contains the EventBridge Bus and more
+
+Resources:
+  UserSignUpHookStateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub ${ApplicationName}/userservice/signuphookstatemachine
+      RetentionInDays: 5
+
+  UserSignUpHookExpress:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: statemachine/statemachine.asl.yaml
+      Tracing:
+        Enabled: true
+      Logging:
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt UserSignUpHookStateMachineLogGroup.Arn
+        IncludeExecutionData: true
+        Level: ALL
+      DefinitionSubstitutions:
+        EventBridgeBusName:
+          Fn::ImportValue: !Sub ${CommonStackName}:eventbridge-bus-name
+        UserTable: !Ref UserTable
+        ApplicationName: !Ref ApplicationName
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:*
+              Resource: "*"
+        - EventBridgePutEventsPolicy:
+            EventBusName:
+              Fn::ImportValue: !Sub ${CommonStackName}:eventbridge-bus-name
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserTable
+      Events:
+        UserSignUp:
+          Type: EventBridgeRule
+          Properties:
+            EventBusName:
+              Fn::ImportValue: !Sub ${CommonStackName}:eventbridge-bus-name
+            Pattern:
+              source:
+                - !Sub ${ApplicationName}.idp
+              detail-type:
+                - signup
+      Type: EXPRESS
+
+  UserTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${ApplicationName}-users
+      AttributeDefinitions:
+        - AttributeName: userid
+          AttributeType: S
+      KeySchema:
+        - AttributeName: userid
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST

@@ -1,0 +1,28 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: Connected BBQ Application Common Infra
+Parameters:
+  Application:
+    Type: String
+    Description: Name of owning application
+
+Resources:
+  EventBridgeBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub ${Application}-application-eventbus
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+
+Outputs:
+  EventBridgeName:
+    Description: The EventBus Name
+    Value: !Ref EventBridgeBus
+    Export:
+      Name: !Sub ${AWS::StackName}:eventbridge-bus-name
+  EventBridgeArn:
+    Description: The EventBus ARN
+    Value: !GetAtt EventBridgeBus.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:eventbridge-bus-arn
