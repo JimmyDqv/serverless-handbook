@@ -1,0 +1,41 @@
+Comment: Tenant service - Create Tenant On User Created
+StartAt: Debug
+States:
+  Debug:
+    Type: Pass
+    Next: Genetate Tenant ID
+  Genetate Tenant ID:
+    Type: Pass
+    Parameters:
+      tenantid.$: States.UUID()
+    ResultPath: $.TenantID
+    Next: Create Tenant
+  Create Tenant:
+    Type: Task
+    Resource: arn:aws:states:::dynamodb:putItem
+    Parameters:
+      TableName: ${TenantTable}
+      Item:
+        tenantid:
+          S.$: $.TenantID.tenantid
+    ResultPath: null
+    Next: Prepare Event
+  Prepare Event:
+    Type: Pass
+    Parameters:
+      tenantId.$: $.TenantID.tenantid
+      email.$: $.detail.email
+      userName.$: $.detail.userName
+      name.$: $.detail.name
+    ResultPath: $.TenantData
+    Next: Post Event
+  Post Event:
+    Type: Task
+    Resource: arn:aws:states:::events:putEvents
+    Parameters:
+      Entries:
+        - Source: ${ApplicationName}.tenant
+          DetailType: created
+          Detail.$: $.TenantData
+          EventBusName: ${EventBridgeBusName}
+    End: true

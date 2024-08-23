@@ -32,6 +32,9 @@ const Header = () => {
           <Link to="/profile" className="mr-4">
             Profile
           </Link>
+          <Link to="/tenant" className="mr-4">
+            Tenant
+          </Link>
         </div>
         <div>
           {loggedIn ? (

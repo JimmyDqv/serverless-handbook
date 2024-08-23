@@ -1,0 +1,306 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: Connected BBQ Application Tenant Service
+Parameters:
+  ApplicationName:
+    Type: String
+    Description: Name of owning application
+    Default: bbq-iot
+  CommonStackName:
+    Type: String
+    Description: The name of the common stack that contains the EventBridge Bus and more
+  UserPoolStackName:
+    Type: String
+    Description: The name of the common stack that contains the EventBridge Bus and more
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 2048
+    Runtime: python3.12
+
+Resources:
+  TenantCreateStateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub ${ApplicationName}/tenantservice/createstatemachine
+      RetentionInDays: 5
+
+  TenantAddFirstAdminStateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub ${ApplicationName}/tenantservice/addfirstadminstatemachine
+      RetentionInDays: 5
+
+  TenantCreateExpress:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: create-tenant-statemachine/statemachine.asl.yaml
+      Tracing:
+        Enabled: true
+      Logging:
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt TenantCreateStateMachineLogGroup.Arn
+        IncludeExecutionData: true
+        Level: ALL
+      DefinitionSubstitutions:
+        EventBridgeBusName:
+          Fn::ImportValue: !Sub ${CommonStackName}:eventbridge-bus-name
+        TenantTable: !Ref TenantTable
+        ApplicationName: !Ref ApplicationName
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:*
+              Resource: "*"
+        - EventBridgePutEventsPolicy:
+            EventBusName:
+              Fn::ImportValue: !Sub ${CommonStackName}:eventbridge-bus-name
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TenantTable
+      Events:
+        CreateTenantEvent:
+          Type: EventBridgeRule
+          Properties:
+            EventBusName:
+              Fn::ImportValue: !Sub ${CommonStackName}:eventbridge-bus-name
+            Pattern:
+              source:
+                - !Sub ${ApplicationName}.user
+              detail-type:
+                - created
+      Type: EXPRESS
+
+  TenantAddFirstAdminExpress:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: add-tenant-first-admin-statemachine/statemachine.asl.yaml
+      Tracing:
+        Enabled: true
+      Logging:
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt TenantAddFirstAdminStateMachineLogGroup.Arn
+        IncludeExecutionData: true
+        Level: ALL
+      DefinitionSubstitutions:
+        EventBridgeBusName:
+          Fn::ImportValue: !Sub ${CommonStackName}:eventbridge-bus-name
+        TenantUserTable: !Ref TenantUserTable
+        ApplicationName: !Ref ApplicationName
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:*
+              Resource: "*"
+        - EventBridgePutEventsPolicy:
+            EventBusName:
+              Fn::ImportValue: !Sub ${CommonStackName}:eventbridge-bus-name
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TenantUserTable
+      Events:
+        CreateTenantEvent:
+          Type: EventBridgeRule
+          Properties:
+            EventBusName:
+              Fn::ImportValue: !Sub ${CommonStackName}:eventbridge-bus-name
+            Pattern:
+              source:
+                - !Sub ${ApplicationName}.tenant
+              detail-type:
+                - created
+      Type: EXPRESS
+
+  LambdaGetTenantsForUser:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: Lambda/Internal/GetTenantForUser
+      Handler: handler.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantUserTable
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !Ref TenantUserTable
+          DYNAMODB_INDEX_NAME: user-index
+      Events:
+        GetTenantsForUserApi:
+          Type: Api
+          Properties:
+            Path: /tenants/{userId}
+            Method: get
+            RestApiId: !Ref AdminTenantAPi
+            Auth:
+              AuthorizationType: AWS_IAM
+
+  LambdaGetTenants:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: Lambda/Api/TenantsList
+      Handler: get.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantUserTable
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !Ref TenantUserTable
+          DYNAMODB_INDEX_NAME: user-index
+      Events:
+        GetTenantsForUserApi:
+          Type: Api
+          Properties:
+            Path: /tenants/{userId}
+            Method: get
+            RestApiId: !Ref TenantAPi
+            Auth:
+              Authorizer: LambdaUserRequestAuthorizer
+              #OverrideApiAuth: true
+
+  LambdaTenantInfoGet:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: Lambda/Api/TenantInfoGet
+      Handler: get.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantTable
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !Ref TenantTable
+      Events:
+        GetTenantInfoApi:
+          Type: Api
+          Properties:
+            Path: /tenant/{tenantId}
+            Method: get
+            RestApiId: !Ref TenantAPi
+
+  LambdaTenantInfoPut:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: Lambda/Api/TenantInfoPut
+      Handler: put.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TenantTable
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !Ref TenantTable
+      Events:
+        PutTenantInfoApi:
+          Type: Api
+          Properties:
+            Path: /tenant/{tenantId}
+            Method: put
+            RestApiId: !Ref TenantAPi
+
+  LambdaApiAuthorizer:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: Lambda/Authorizer/Tenant
+      Handler: auth.handler
+      Environment:
+        Variables:
+          JWKS_URL:
+            Fn::ImportValue: !Sub ${UserPoolStackName}:jwks-url
+          AUDIENCE:
+            Fn::ImportValue: !Sub ${UserPoolStackName}:app-audience
+
+  LambdaApiUserAuthorizer:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: Lambda/Authorizer/User
+      Handler: auth.handler
+      Environment:
+        Variables:
+          JWKS_URL:
+            Fn::ImportValue: !Sub ${UserPoolStackName}:jwks-url
+          AUDIENCE:
+            Fn::ImportValue: !Sub ${UserPoolStackName}:app-audience
+
+  TenantAPi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub ${ApplicationName}-tenant-api
+      StageName: prod
+      EndpointConfiguration: REGIONAL
+      Cors:
+        AllowMethods: "'GET,PUT,POST,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+      Auth:
+        AddDefaultAuthorizerToCorsPreflight: false
+        Authorizers:
+          LambdaRequestAuthorizer:
+            FunctionArn: !GetAtt LambdaApiAuthorizer.Arn
+            FunctionPayloadType: REQUEST
+            Identity: 
+              Headers:
+                - Authorization
+          LambdaUserRequestAuthorizer:
+            FunctionArn: !GetAtt LambdaApiUserAuthorizer.Arn
+            FunctionPayloadType: REQUEST
+            Identity: 
+              Headers:
+                - Authorization
+        DefaultAuthorizer: LambdaRequestAuthorizer
+
+  AdminTenantAPi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub ${ApplicationName}-tenant-admin-api
+      StageName: prod
+      EndpointConfiguration: REGIONAL
+      Cors:
+        AllowMethods: "'GET,PUT,POST,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+      Auth:
+        DefaultAuthorizer: AWS_IAM
+
+  TenantTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${ApplicationName}-tenants
+      AttributeDefinitions:
+        - AttributeName: tenantid
+          AttributeType: S
+      KeySchema:
+        - AttributeName: tenantid
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  TenantUserTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${ApplicationName}-tenant-users
+      AttributeDefinitions:
+        - AttributeName: tenantid
+          AttributeType: S
+        - AttributeName: userid
+          AttributeType: S
+      KeySchema:
+        - AttributeName: tenantid
+          KeyType: HASH
+        - AttributeName: userid
+          KeyType: RANGE
+      GlobalSecondaryIndexes: 
+        - IndexName: user-index
+          KeySchema:
+            - AttributeName: userid
+              KeyType: HASH
+            - AttributeName: tenantid
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      BillingMode: PAY_PER_REQUEST
+
+Outputs:
+  AdminApiID:
+    Value: !Ref AdminTenantAPi
+    Description: The ID of the Admin API
+    Export:
+      Name: !Sub ${AWS::StackName}:admin-api-id

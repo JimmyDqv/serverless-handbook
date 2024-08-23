@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Amplify } from "aws-amplify";
 import Login from './pages/Login';
 import Profile from './pages/Profile';
+import Tenant from './pages/Tenant';
 import Dashboard from './pages/Dashboard';
 
 import awsExports from "./aws-exports";
@@ -17,6 +18,7 @@ const App = () => {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/profile" element={<Profile/>} />
+        <Route path="/tenant" element={<Tenant/>} />
         <Route path="/dashboard" element={<Dashboard/>} />
         <Route path="/" element={<Dashboard/>} />
       </Routes>

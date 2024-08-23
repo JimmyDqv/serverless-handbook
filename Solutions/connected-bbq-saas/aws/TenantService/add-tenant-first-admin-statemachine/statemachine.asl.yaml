@@ -1,0 +1,43 @@
+Comment: Tenant Service - Create Tenant Admin User Mapping
+StartAt: Debug
+States:
+  Debug:
+    Type: Pass
+    Next: Create Tenant User Mapping
+  Create Tenant User Mapping:
+    Type: Task
+    Resource: arn:aws:states:::dynamodb:putItem
+    Parameters:
+      TableName: ${TenantUserTable}
+      Item:
+        tenantid:
+          S.$: $.detail.tenantId
+        userid:
+          S.$: $.detail.userName
+        name:
+          S.$: $.detail.name
+        email:
+          S.$: $.detail.email
+        role: admin
+    ResultPath: null
+    Next: Prepare Event
+  Prepare Event:
+    Type: Pass
+    Parameters:
+      tenantId.$: $.detail.tenantId
+      email.$: $.detail.email
+      userName.$: $.detail.userName
+      name.$: $.detail.name
+      role: admin
+    ResultPath: $.TenantUser
+    Next: Post Event
+  Post Event:
+    Type: Task
+    Resource: arn:aws:states:::events:putEvents
+    Parameters:
+      Entries:
+        - Source: ${ApplicationName}.tenant
+          DetailType: adminUserAdded
+          Detail.$: $.TenantUser
+          EventBusName: ${EventBridgeBusName}
+    End: true

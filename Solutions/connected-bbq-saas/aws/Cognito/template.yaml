@@ -11,6 +11,12 @@ Parameters:
   CommonStackName:
     Type: String
     Description: The name of the common stack that contains the EventBridge Bus and more
+  TenantAdminApi:
+    Type: String
+    Description: The Root url to the tenant admin API
+  TenantAdminApiId:
+    Type: String
+    Description: The admin Api ID
 
 Globals:
   Function:
@@ -43,6 +49,39 @@ Resources:
           EventBusName: 
             Fn::ImportValue: !Sub ${CommonStackName}:eventbridge-bus-name
           ApplicationName: !Ref ApplicationName
+
+  PreTokenGenerationHook:
+    Type: AWS::Serverless::Function
+    Properties:
+      AutoPublishAlias: "true"
+      CodeUri: ./PreTokenGenerationLambda
+      Handler: hook.handler
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action: 
+              - execute-api:Invoke
+            Resource: 
+              - !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${TenantAdminApiId}/prod/GET/*
+      Environment:
+        Variables:
+          TENANT_API_ENDPOINT: !Ref TenantAdminApi
+
+  PreTokenGenerationHookPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt PreTokenGenerationHook.Arn
+      Principal: cognito-idp.amazonaws.com
 
   PostSignUpHookPermission:
     Type: AWS::Lambda::Permission
@@ -90,6 +129,7 @@ Resources:
           Required: false
       LambdaConfig:
         PostConfirmation: !GetAtt PostSignUpHook.Arn
+        PreTokenGeneration: !GetAtt PreTokenGenerationHook.Arn
 
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
