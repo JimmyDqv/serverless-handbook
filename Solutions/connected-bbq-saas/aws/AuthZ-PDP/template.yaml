@@ -1,0 +1,59 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: Connected BBQ Application Tenant Service
+Parameters:
+  ApplicationName:
+    Type: String
+    Description: Name of owning application
+    Default: bbq-iot
+  UserPoolStackName:
+    Type: String
+    Description: The name of the Stack with the Cognito User Pool
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 2048
+    Runtime: python3.12
+
+Resources:
+  LambdaPDPFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: Lambda/AuthZ
+      Handler: authz.handler
+      Environment:
+        Variables:
+          JWKS_URL:
+            Fn::ImportValue: !Sub ${UserPoolStackName}:jwks-url
+          AUDIENCE:
+            Fn::ImportValue: !Sub ${UserPoolStackName}:app-audience
+      Events:
+        AuthZ:
+          Type: Api
+          Properties:
+            Path: /authz
+            Method: post
+            RestApiId: !Ref PDPApi
+            Auth:
+              AuthorizationType: AWS_IAM
+
+  PDPApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub ${ApplicationName}-pdp-api
+      StageName: prod
+      EndpointConfiguration: REGIONAL
+      Cors:
+        AllowMethods: "'GET,PUT,POST,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+      Auth:
+        DefaultAuthorizer: AWS_IAM
+
+Outputs:
+  PDPApiID:
+    Value: !Ref PDPApi
+    Description: The ID of the PDP API
+    Export:
+      Name: !Sub ${AWS::StackName}:pdp-api-id

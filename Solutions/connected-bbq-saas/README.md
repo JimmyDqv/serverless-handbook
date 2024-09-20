@@ -11,3 +11,5 @@ For deep dives, check out the published blog posts:
 [Building a serverless connected BBQ as SaaS - Part 2 - User Creation](https://jimmydqv.com/serverless-bbq-saas-part2-users/)
 
 [Building a serverless connected BBQ as SaaS - Part 3 - Tenants](https://jimmydqv.com/serverless-bbq-saas-part3-tenants/)
+
+[Building a serverless connected BBQ as SaaS - Part 4 - AuthZ](https://jimmydqv.com/serverless-bbq-saas-part4-authz/)
