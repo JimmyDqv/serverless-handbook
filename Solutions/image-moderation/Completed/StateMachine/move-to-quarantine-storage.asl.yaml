@@ -1,0 +1,49 @@
+Comment: Handle result and copy files to quarantine bucket
+StartAt: Debug
+States:
+  Debug:
+    Type: Pass
+    Next: Get Object Metadata
+  Get Object Metadata:
+    Type: Task
+    Parameters:
+      Bucket: ${StagingBucketName}
+      Key.$: $.data.id
+    Resource: arn:aws:states:::aws-sdk:s3:headObject
+    Next: CopyObject
+    ResultPath: $.S3MetaData
+  CopyObject:
+    Type: Task
+    Parameters:
+      Bucket: ${QuarantineBucketName}
+      CopySource.$: >-
+        States.Format('${StagingBucketName}/{}',$.data.id)
+      Key.$: $.data.id
+    Resource: arn:aws:states:::aws-sdk:s3:copyObject
+    ResultPath: null
+    Next: DeleteObject
+  DeleteObject:
+    Type: Task
+    Parameters:
+      Bucket: ${StagingBucketName}
+      Key.$: $.data.id
+    Resource: arn:aws:states:::aws-sdk:s3:deleteObject
+    ResultPath: null
+    Next: Post Event File Moved
+  Post Event File Moved:
+    Type: Task
+    Resource: arn:aws:states:::events:putEvents
+    Parameters:
+      Entries:
+        - Detail:
+            metadata: {}
+            data:
+              id.$: $.data.id
+              status: QUARANTINED
+              contentType.$: $.S3MetaData.ContentType
+              fileSize.$: $.S3MetaData.ContentLength
+          DetailType: Upload Completed
+          EventBusName: ${EventBusName}
+          Source: Upload
+    End: true
+    ResultPath: null

@@ -1,0 +1,123 @@
+Comment: Moderate images using Rekognition
+StartAt: Debug
+States:
+  Debug:
+    Type: Pass
+    Next: Get Object Metadata
+  Get Object Metadata:
+    Type: Task
+    Parameters:
+      Bucket.$: $.s3ObjectDetails.bucketName
+      Key.$: $.s3ObjectDetails.objectKey
+    Resource: arn:aws:states:::aws-sdk:s3:headObject
+    Next: Get Object Tags
+    ResultPath: $.S3MetaData
+  Get Object Tags:
+    Type: Task
+    Parameters:
+      Bucket.$: $.s3ObjectDetails.bucketName
+      Key.$: $.s3ObjectDetails.objectKey
+    Resource: arn:aws:states:::aws-sdk:s3:getObjectTagging
+    Next: Is File Supported?
+    ResultPath: $.s3Tags
+  Is File Supported?:
+    Type: Choice
+    Choices:
+      - Or:
+          - Variable: $.S3MetaData.ContentType
+            StringMatches: image/png
+          - Variable: $.S3MetaData.ContentType
+            StringMatches: image/jpeg
+        Next: Moderate Image
+    Default: File Not Supported
+  File Not Supported:
+    Type: Pass
+    Next: Add FILE_NOT_SUPPORTED to Object Tags Array
+    Parameters:
+      ContentTypes: []
+      ModerationLabels: []
+      ModerationModelVersion: "7.0"
+      ThreatsFound: "-1"
+    ResultPath: $.RekognitionModeration
+  Add FILE_NOT_SUPPORTED to Object Tags Array:
+    Type: Pass
+    ResultPath: $.scanResult
+    Parameters:
+      status: FILE_NOT_SUPPORTED
+      newTagSet.$: >-
+        States.StringToJson(States.Format('[{},{}]',
+        States.ArrayGetItem(States.StringSplit(States.JsonToString($.s3Tags.TagSet),
+        '[]'),0), '{"Key":"ImageModerationStatus","Value":"FILE_NOT_SUPPORTED"}'))
+    Next: Tag S3 Object
+  Moderate Image:
+    Type: Task
+    Parameters:
+      Image:
+        S3Object:
+          Bucket.$: $.s3ObjectDetails.bucketName
+          Name.$: $.s3ObjectDetails.objectKey
+    Resource: arn:aws:states:::aws-sdk:rekognition:detectModerationLabels
+    Next: File Supported
+    ResultPath: $.RekognitionModeration
+  File Supported:
+    Type: Pass
+    Parameters:
+      ThreatsFound.$: States.ArrayLength($.RekognitionModeration.ModerationLabels)
+      ContentTypes.$: $.RekognitionModeration.ContentTypes
+      ModerationLabels.$: $.RekognitionModeration.ModerationLabels
+      ModerationModelVersion.$: $.RekognitionModeration.ModerationModelVersion
+    ResultPath: $.RekognitionModeration
+    Next: Was Threats Found?
+  Was Threats Found?:
+    Type: Choice
+    Choices:
+      - Variable: $.RekognitionModeration.ThreatsFound
+        NumericGreaterThan: 0
+        Next: Add THREATS_DETECTED to Object Tags Array
+    Default: Add NO_THREATS to Object Tags Array
+  Add THREATS_DETECTED to Object Tags Array:
+    Type: Pass
+    Parameters:
+      status: THREATS_FOUND
+      newTagSet.$: >-
+        States.StringToJson(States.Format('[{},{}]',
+        States.ArrayGetItem(States.StringSplit(States.JsonToString($.s3Tags.TagSet),
+        '[]'),0), '{"Key":"ImageModerationStatus","Value":"THREATS_FOUND"}'))
+    ResultPath: $.scanResult
+    Next: Tag S3 Object
+  Add NO_THREATS to Object Tags Array:
+    Type: Pass
+    Next: Tag S3 Object
+    Parameters:
+      status: NO_THREATS_FOUND
+      newTagSet.$: >-
+        States.StringToJson(States.Format('[{},{}]',
+        States.ArrayGetItem(States.StringSplit(States.JsonToString($.s3Tags.TagSet),
+        '[]'),0), '{"Key":"ImageModerationStatus","Value":"NO_THREATS_FOUND"}'))
+    ResultPath: $.scanResult
+  Tag S3 Object:
+    Type: Task
+    Parameters:
+      Bucket.$: $.s3ObjectDetails.bucketName
+      Key.$: $.s3ObjectDetails.objectKey
+      Tagging:
+        TagSet.$: $.scanResult.newTagSet
+    Resource: arn:aws:states:::aws-sdk:s3:putObjectTagging
+    ResultPath: null
+    Next: Post Scan Result Event
+  Post Scan Result Event:
+    Type: Task
+    Resource: arn:aws:states:::events:putEvents
+    Parameters:
+      Entries:
+        - Detail:
+            metadata: {}
+            data:
+              id.$: $.s3ObjectDetails.objectKey
+              status.$: $.scanResult.status
+              scanData.$: $.RekognitionModeration
+          DetailType: Moderation Scan Completed
+          EventBusName: ${EventBusName}
+          Source: ImageModeration
+    End: true
+    ResultPath: null

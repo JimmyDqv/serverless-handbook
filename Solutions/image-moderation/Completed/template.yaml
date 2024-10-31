@@ -1,0 +1,117 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: Handle scan result and move files to permanent or quarantine storage
+
+Parameters:
+  ApplicationName:
+    Type: String
+    Description: Name of owning application
+    Default: image-moderation
+  CommonInfraStackName:
+    Type: String
+    Description: Name of the common infra stack
+
+Resources:
+
+  MoveFilesToPermanentStorageStateMachineStandard:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: StateMachine/move-to-permanent-storage.asl.yaml
+      DefinitionSubstitutions:
+        EventBusName:
+          Fn::ImportValue: !Sub ${CommonInfraStackName}:event-bus-name
+        StorageBucketName:
+          Fn::ImportValue: !Sub ${CommonInfraStackName}:storage-bucket-name
+        StagingBucketName:
+          Fn::ImportValue: !Sub ${CommonInfraStackName}:staging-bucket-name
+      Tracing:
+        Enabled: true
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:*
+              Resource: "*"
+        - S3FullAccessPolicy:
+            BucketName:
+              Fn::ImportValue: !Sub ${CommonInfraStackName}:staging-bucket-name
+        - S3FullAccessPolicy:
+            BucketName:
+              Fn::ImportValue: !Sub ${CommonInfraStackName}:storage-bucket-name
+        - EventBridgePutEventsPolicy:
+            EventBusName:
+              Fn::ImportValue: !Sub ${CommonInfraStackName}:event-bus-name
+      Events:
+        NoModerationThreatsFoundEvent:
+          Type: EventBridgeRule
+          Properties:
+            EventBusName:
+              Fn::ImportValue: !Sub ${CommonInfraStackName}:event-bus-name
+            InputPath: $.detail
+            Pattern:
+              source:
+                - ImageModeration
+              detail-type:
+                - Moderation Scan Completed
+              detail:
+                data:
+                  status:
+                    - NO_THREATS_FOUND  
+
+  MoveFilesToQuarantineStorageStateMachineStandard:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: StateMachine/move-to-quarantine-storage.asl.yaml
+      DefinitionSubstitutions:
+        EventBusName:
+          Fn::ImportValue: !Sub ${CommonInfraStackName}:event-bus-name
+        QuarantineBucketName:
+          Fn::ImportValue: !Sub ${CommonInfraStackName}:quarantine-bucket-name
+        StagingBucketName:
+          Fn::ImportValue: !Sub ${CommonInfraStackName}:staging-bucket-name
+      Tracing:
+        Enabled: true
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:*
+              Resource: "*"
+        - S3FullAccessPolicy:
+            BucketName:
+              Fn::ImportValue: !Sub ${CommonInfraStackName}:staging-bucket-name
+        - S3FullAccessPolicy:
+            BucketName:
+              Fn::ImportValue: !Sub ${CommonInfraStackName}:quarantine-bucket-name
+        - EventBridgePutEventsPolicy:
+            EventBusName:
+              Fn::ImportValue: !Sub ${CommonInfraStackName}:event-bus-name
+      Events:
+        ModerationThreatsFoundEvent:
+          Type: EventBridgeRule
+          Properties:
+            EventBusName:
+              Fn::ImportValue: !Sub ${CommonInfraStackName}:event-bus-name
+            InputPath: $.detail
+            Pattern:
+              source:
+                - ImageModeration
+              detail-type:
+                - Moderation Scan Completed
+              detail:
+                data:
+                  status:
+                    - THREATS_FOUND
+        GuardDutyMalwareScanResult:
+          Type: EventBridgeRule
+          Properties:
+            InputPath: $.detail
+            Pattern:
+              source:
+                - aws.guardduty
+              detail-type:
+                - GuardDuty Malware Protection Object Scan Result
+              detail:
+                scanResultDetails:
+                  scanResultStatus:
+                    - THREATS_FOUND
