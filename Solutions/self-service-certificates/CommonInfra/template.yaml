@@ -1,0 +1,42 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: Certificate Self Service Common Infrastructure
+Parameters:
+  ApplicationName:
+    Type: String
+    Description: Name of owning application
+    Default: image-moderation
+
+Resources:
+  StorageBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub ${ApplicationName}-storage-bucket
+
+
+  EventBridgeBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub ${ApplicationName}-event-bus
+
+
+Outputs:
+  StorageBucketName:
+    Description: The name of the certificate bucket
+    Value: !Ref StorageBucket
+    Export:
+      Name: !Sub ${AWS::StackName}:certificate-bucket-name
+
+  EventBridgeBusName:
+    Description: The EventBridge EventBus Name
+    Value: !Ref EventBridgeBus
+    Export:
+      Name: !Sub ${AWS::StackName}:event-bus-name
+      
+  EventBridgeBusArn:
+    Description: The EventBridge EventBus ARN
+    Value: !GetAtt EventBridgeBus.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:event-bus-arn

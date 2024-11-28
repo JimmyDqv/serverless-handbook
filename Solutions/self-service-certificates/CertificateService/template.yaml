@@ -1,0 +1,99 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: Create the API for self service certificate management
+Parameters:
+  ApplicationName:
+    Type: String
+    Description: Name of owning application
+  CommonInfraStackName:
+    Type: String
+    Description: The name of the common stack that contains the EventBridge Bus and more
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 2048
+    Runtime: python3.12
+    Environment:
+        Variables:
+          CERTIFICATE_BUCKET_NAME: 
+            Fn::ImportValue: !Sub "${CommonInfraStackName}:certificate-bucket-name"
+
+Resources:
+
+  LambdaGenerateRootCA:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: Lambda/API/GenerateRootCA
+      Handler: handler.handler
+      Policies:
+        - S3FullAccessPolicy:
+            BucketName: 
+              Fn::ImportValue: !Sub "${CommonInfraStackName}:certificate-bucket-name"
+      Events:
+        CreateRootCAApi:
+          Type: Api
+          Properties:
+            Path: /certificates/root
+            Method: post
+            RestApiId: !Ref GenerateCertificatesApi
+
+  LambdaGenerateIntermediateCA:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: Lambda/API/GenerateIntermediateCA
+      Handler: handler.handler
+      Policies:
+        - S3FullAccessPolicy:
+            BucketName: 
+              Fn::ImportValue: !Sub "${CommonInfraStackName}:certificate-bucket-name"
+      Events:
+        CreateIntermediateCAApi:
+          Type: Api
+          Properties:
+            Path: /certificates/intermediate
+            Method: post
+            RestApiId: !Ref GenerateCertificatesApi   
+
+  LambdaGenerateDeviceCertificate:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: Lambda/API/GenerateDeviceCert
+      Handler: handler.handler
+      Policies:
+        - S3FullAccessPolicy:
+            BucketName: 
+              Fn::ImportValue: !Sub "${CommonInfraStackName}:certificate-bucket-name"      
+
+  LambdaGenerateServerCertificate:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: Lambda/API/GenerateServerCert
+      Handler: handler.handler
+      Policies:
+        - S3FullAccessPolicy:
+            BucketName: 
+              Fn::ImportValue: !Sub "${CommonInfraStackName}:certificate-bucket-name"
+        - Version: "2012-10-17"
+          Statement:
+            Action:
+              - acm:*
+            Effect: Allow
+            Resource: "*"
+      Events:
+        CreateServerCAApi:
+          Type: Api
+          Properties:
+            Path: /certificates/server
+            Method: post
+            RestApiId: !Ref GenerateCertificatesApi
+
+  GenerateCertificatesApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Description: API for creating and managing certificates
+      Name: !Sub ${ApplicationName}-api
+      StageName: prod
+      OpenApiVersion: '3.0.1'
+      AlwaysDeploy: true
+      EndpointConfiguration: REGIONAL
