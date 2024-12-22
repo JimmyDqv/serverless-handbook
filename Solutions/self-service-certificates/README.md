@@ -4,7 +4,7 @@
 
 In this solution you will build a serverless self service certificate management solution.
 
-For a full deep dive visit [my blog post on this topic](https://jimmydqv.com/self-service-certs-part-1/index.html)
+For a full deep dive visit my blog posts on the topic [Part 1](https://jimmydqv.com/self-service-certs-part-1/index.html), [Part 2](https://jimmydqv.com/self-service-certs-part-2/index.html)
 
 ## Cost
 
@@ -20,9 +20,13 @@ Now, Let's go build!
 
 ## Architecture overview
 
-We will build this completely serverless using Amazon API Gateway and Lambda functions, with storage of the certificates in S3 and Certificate Manager. 
+We will build this completely serverless using Amazon API Gateway and Lambda functions, with storage of the certificates in S3 and Certificate Manager.
 
 ![API overview](images/overview.png)
+
+Looking the creation flow it would look like this, depending on if it's a CA or leaf (server / client) certificate being created.
+
+![Create Flow](images/create-flow.png)
 
 ## Deploy common infrastructure
 

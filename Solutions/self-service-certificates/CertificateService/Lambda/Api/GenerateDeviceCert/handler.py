@@ -6,6 +6,7 @@ from cryptography.hazmat.primitives import serialization, hashes
 import datetime
 import os
 import json
+import uuid
 from Utils import utils
 from botocore.exceptions import ClientError
 
@@ -14,7 +15,7 @@ acm_client = boto3.client("acm")
 eb_client = boto3.client("events")
 
 
-def create_server_certificate(
+def create_device_certificate(
     intermediate_private_key_pem,
     intermediate_cert_pem,
     fqdn,
@@ -88,7 +89,10 @@ def handler(event, context):
 
     bucket_name = os.environ.get("CERTIFICATE_BUCKET_NAME")
 
-    top_domain, parent_domain = utils.extract_domain_info(body["fqdn"])
+    top_domain = utils.get_top_domain(body["parent_fqdn"])
+    parent_domain = body["parent_fqdn"]
+    device_uuid = uuid.uuid4()
+    device_fqdn = f"{device_uuid}.{parent_domain}"
 
     s3_intermediate_ca_private_key = (
         f"{top_domain}/{parent_domain}/intermediate_ca/private_key.pem"
@@ -122,34 +126,27 @@ def handler(event, context):
         Bucket=bucket_name, Key=s3_intermediate_ca_chain_key
     )["Body"].read()
 
-    # Create Server Certificate
-    server_private_key_pem, server_cert_pem = create_server_certificate(
+    # Create Device Certificate
+    device_private_key_pem, device_cert_pem = create_device_certificate(
         intermediate_private_key,
         intermediate_cert,
-        body["fqdn"],
+        device_fqdn,
         body["country"],
         body["state"],
         body["organization"],
         body["validity_days"],
     )
 
-    s3_folder = f"{top_domain}/{parent_domain}/server_certificates/{body['fqdn']}"
+    s3_folder = f"{top_domain}/{parent_domain}/device_certificates/{device_uuid}"
 
     # Upload Server Certificate, Private Key to S3
     s3_client.put_object(
         Bucket=bucket_name,
         Key=f"{s3_folder}/private_key.pem",
-        Body=server_private_key_pem,
+        Body=device_private_key_pem,
     )
     s3_client.put_object(
-        Bucket=bucket_name, Key=f"{s3_folder}/certificate.pem", Body=server_cert_pem
-    )
-
-    # Import the certificate to ACM
-    response = acm_client.import_certificate(
-        Certificate=server_cert_pem,
-        PrivateKey=server_private_key_pem,
-        CertificateChain=cert_chain_pem,
+        Bucket=bucket_name, Key=f"{s3_folder}/certificate.pem", Body=device_cert_pem
     )
 
     # Post an event to EventBridge
@@ -159,8 +156,8 @@ def handler(event, context):
         "certificates",
         "created",
         {
-            "FQDN": body["fqdn"],
-            "Type": "Server",
+            "FQDN": device_fqdn,
+            "Type": "Client",
             "ParentFQDN": parent_domain,
             "ValidUntil": utils.get_expiration_date_as_string(body["validity_days"]),
         },
@@ -170,10 +167,9 @@ def handler(event, context):
         "statusCode": 200,
         "body": json.dumps(
             {
-                "message": "Server certificate created, uploaded to S3, and imported to ACM.",
-                "fqdn": body["fqdn"],
+                "message": "Device certificate created, uploaded to S3",
+                "fqdn": device_fqdn,
                 "s3_folder": s3_folder,
-                "acm_certificate_arn": response["CertificateArn"],
             }
         ),
     }

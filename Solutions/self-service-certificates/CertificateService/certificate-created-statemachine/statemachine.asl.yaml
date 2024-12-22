@@ -1,0 +1,27 @@
+Comment: Certificate service - Store Certificate Info
+QueryLanguage: JSONata
+StartAt: Debug
+States:
+  Debug:
+    Type: Pass
+    Next: Store Certificate Info
+    Assign:
+      FQDN: "{% $states.input.detail.FQDN %}"
+      ParentFQDN: "{% $states.input.detail.ParentFQDN %}"
+      Type: "{% $states.input.detail.Type %}"
+      ValidUntil: "{% $states.input.detail.ValidUntil %}"
+  Store Certificate Info:
+    Type: Task
+    Resource: arn:aws:states:::dynamodb:putItem
+    Arguments:
+      TableName: ${InventoryTable}
+      Item:
+        FQDN:
+          S: "{% $FQDN %}"
+        ParentFQDN:
+          S: "{% $ParentFQDN %}"
+        Type:
+          S: "{% $Type %}"
+        ValidUntil:
+          S: "{% $ValidUntil %}"
+    End: true

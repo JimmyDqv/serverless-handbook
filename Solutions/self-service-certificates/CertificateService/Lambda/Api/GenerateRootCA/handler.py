@@ -6,8 +6,10 @@ from cryptography.hazmat.primitives import serialization, hashes
 import datetime
 import os
 import json
+from Utils import utils
 
 s3_client = boto3.client("s3")
+eb_client = boto3.client("events")
 
 
 def create_root_ca(fqdn, country, state, organization, validity_days):
@@ -35,10 +37,7 @@ def create_root_ca(fqdn, country, state, organization, validity_days):
         .public_key(private_key.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(datetime.datetime.now(datetime.timezone.utc))
-        .not_valid_after(
-            datetime.datetime.now(datetime.timezone.utc)
-            + datetime.timedelta(days=validity_days)
-        )
+        .not_valid_after(utils.get_expiration_date(validity_days))
         .add_extension(
             x509.BasicConstraints(ca=True, path_length=None),
             critical=True,
@@ -68,6 +67,14 @@ def handler(event, context):
 
     body = json.loads(event["body"])
 
+    if not utils.is_top_domain(body["fqdn"]):
+        return {
+            "statusCode": 400,
+            "body": json.dumps(
+                {"message": "fqdn must be a top-level domain"},
+            ),
+        }
+
     bucket_name = os.environ.get("CERTIFICATE_BUCKET_NAME")
     if not bucket_name:
         return {
@@ -85,10 +92,28 @@ def handler(event, context):
 
     # Upload Root CA private key and certificate to S3
     s3_client.put_object(
-        Bucket=bucket_name, Key="root_ca/private_key.pem", Body=private_key_pem
+        Bucket=bucket_name,
+        Key=f"{body['fqdn']}/root_ca/private_key.pem",
+        Body=private_key_pem,
     )
     s3_client.put_object(
-        Bucket=bucket_name, Key="root_ca/certificate.pem", Body=root_cert_pem
+        Bucket=bucket_name,
+        Key=f"{body['fqdn']}/root_ca/certificate.pem",
+        Body=root_cert_pem,
+    )
+
+    # Post an event to EventBridge
+    utils.post_event_to_eventbridge(
+        eb_client,
+        os.environ["EVENTBRIDGE_BUS_NAME"],
+        "certificates",
+        "created",
+        {
+            "FQDN": body["fqdn"],
+            "Type": "Root",
+            "ParentFQDN": "Root",
+            "ValidUntil": utils.get_expiration_date_as_string(body["validity_days"]),
+        },
     )
 
     return {

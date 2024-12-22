@@ -15,21 +15,97 @@ Globals:
     MemorySize: 2048
     Runtime: python3.12
     Environment:
-        Variables:
-          CERTIFICATE_BUCKET_NAME: 
-            Fn::ImportValue: !Sub "${CommonInfraStackName}:certificate-bucket-name"
+      Variables:
+        CERTIFICATE_BUCKET_NAME:
+          Fn::ImportValue: !Sub "${CommonInfraStackName}:certificate-bucket-name"
+        EVENTBRIDGE_BUS_NAME:
+          Fn::ImportValue: !Sub "${CommonInfraStackName}:event-bus-name"
 
 Resources:
+  InventoryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${ApplicationName}-certificate-inventory
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: FQDN
+          AttributeType: S
+        - AttributeName: ParentFQDN
+          AttributeType: S
+      KeySchema:
+        - AttributeName: FQDN
+          KeyType: HASH
+        - AttributeName: ParentFQDN
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: parent-index
+          KeySchema:
+            - AttributeName: ParentFQDN
+              KeyType: HASH
+            - AttributeName: FQDN
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  UtilsLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: UtilsLayer
+      ContentUri: Lambda/Layer
+      CompatibleRuntimes:
+        - python3.12
+    Metadata:
+      BuildMethod: python3.12
+      Description: "Utils code for Lambda functions"
+
+  LambdaListGetCertificates:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: Lambda/API/ListGetCertificates
+      Layers:
+        - !Ref UtilsLayer
+      Handler: handler.handler
+      Environment:
+        Variables:
+          DYNAMODB_TABLE: !Ref InventoryTable
+          DYNAMODB_INDEX: parent-index
+      Policies:
+        - S3FullAccessPolicy:
+            BucketName:
+              Fn::ImportValue: !Sub "${CommonInfraStackName}:certificate-bucket-name"
+        - EventBridgePutEventsPolicy:
+            EventBusName:
+              Fn::ImportValue: !Sub "${CommonInfraStackName}:event-bus-name"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref InventoryTable
+      Events:
+        ListCertificatesApi:
+          Type: Api
+          Properties:
+            Path: /certificates
+            Method: get
+            RestApiId: !Ref GenerateCertificatesApi
+        GetCertificatesApi:
+          Type: Api
+          Properties:
+            Path: /certificates/{certificate}
+            Method: get
+            RestApiId: !Ref GenerateCertificatesApi
 
   LambdaGenerateRootCA:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: Lambda/API/GenerateRootCA
+      Layers:
+        - !Ref UtilsLayer
       Handler: handler.handler
       Policies:
         - S3FullAccessPolicy:
-            BucketName: 
+            BucketName:
               Fn::ImportValue: !Sub "${CommonInfraStackName}:certificate-bucket-name"
+        - EventBridgePutEventsPolicy:
+            EventBusName:
+              Fn::ImportValue: !Sub "${CommonInfraStackName}:event-bus-name"
       Events:
         CreateRootCAApi:
           Type: Api
@@ -43,37 +119,59 @@ Resources:
     Properties:
       CodeUri: Lambda/API/GenerateIntermediateCA
       Handler: handler.handler
+      Layers:
+        - !Ref UtilsLayer
       Policies:
         - S3FullAccessPolicy:
-            BucketName: 
+            BucketName:
               Fn::ImportValue: !Sub "${CommonInfraStackName}:certificate-bucket-name"
+        - EventBridgePutEventsPolicy:
+            EventBusName:
+              Fn::ImportValue: !Sub "${CommonInfraStackName}:event-bus-name"
       Events:
         CreateIntermediateCAApi:
           Type: Api
           Properties:
             Path: /certificates/intermediate
             Method: post
-            RestApiId: !Ref GenerateCertificatesApi   
+            RestApiId: !Ref GenerateCertificatesApi
 
   LambdaGenerateDeviceCertificate:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: Lambda/API/GenerateDeviceCert
       Handler: handler.handler
+      Layers:
+        - !Ref UtilsLayer
       Policies:
         - S3FullAccessPolicy:
-            BucketName: 
-              Fn::ImportValue: !Sub "${CommonInfraStackName}:certificate-bucket-name"      
+            BucketName:
+              Fn::ImportValue: !Sub "${CommonInfraStackName}:certificate-bucket-name"
+        - EventBridgePutEventsPolicy:
+            EventBusName:
+              Fn::ImportValue: !Sub "${CommonInfraStackName}:event-bus-name"
+      Events:
+        CreateDeviceCertApi:
+          Type: Api
+          Properties:
+            Path: /certificates/device
+            Method: post
+            RestApiId: !Ref GenerateCertificatesApi
 
   LambdaGenerateServerCertificate:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: Lambda/API/GenerateServerCert
       Handler: handler.handler
+      Layers:
+        - !Ref UtilsLayer
       Policies:
         - S3FullAccessPolicy:
-            BucketName: 
+            BucketName:
               Fn::ImportValue: !Sub "${CommonInfraStackName}:certificate-bucket-name"
+        - EventBridgePutEventsPolicy:
+            EventBusName:
+              Fn::ImportValue: !Sub "${CommonInfraStackName}:event-bus-name"
         - Version: "2012-10-17"
           Statement:
             Action:
@@ -94,6 +192,50 @@ Resources:
       Description: API for creating and managing certificates
       Name: !Sub ${ApplicationName}-api
       StageName: prod
-      OpenApiVersion: '3.0.1'
+      OpenApiVersion: "3.0.1"
       AlwaysDeploy: true
       EndpointConfiguration: REGIONAL
+
+  CertificateCreatedStateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub ${ApplicationName}/tenantservice/createstatemachine
+      RetentionInDays: 5
+
+  CertificateCreatedExpress:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: certificate-created-statemachine/statemachine.asl.yaml
+      Tracing:
+        Enabled: true
+      Logging:
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt CertificateCreatedStateMachineLogGroup.Arn
+        IncludeExecutionData: true
+        Level: ALL
+      DefinitionSubstitutions:
+        EventBridgeBusName:
+          Fn::ImportValue: !Sub ${CommonInfraStackName}:event-bus-name
+        InventoryTable: !Ref InventoryTable
+        ApplicationName: !Ref ApplicationName
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:*
+              Resource: "*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref InventoryTable
+      Events:
+        CertificateCreatedEvent:
+          Type: EventBridgeRule
+          Properties:
+            EventBusName:
+              Fn::ImportValue: !Sub ${CommonInfraStackName}:event-bus-name
+            Pattern:
+              source:
+                - certificates
+              detail-type:
+                - created
+      Type: EXPRESS

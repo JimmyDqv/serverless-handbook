@@ -6,8 +6,10 @@ from cryptography.hazmat.primitives import serialization, hashes
 import datetime
 import os
 import json
+from Utils import utils
 
 s3_client = boto3.client("s3")
+eb_client = boto3.client("events")
 
 
 def create_intermediate_ca(
@@ -51,10 +53,7 @@ def create_intermediate_ca(
         .public_key(intermediate_private_key.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(datetime.datetime.now(datetime.timezone.utc))
-        .not_valid_after(
-            datetime.datetime.now(datetime.timezone.utc)
-            + datetime.timedelta(days=validity_days)
-        )
+        .not_valid_after(utils.get_expiration_date(validity_days))
         .add_extension(
             x509.BasicConstraints(
                 ca=True, path_length=0
@@ -92,12 +91,36 @@ def handler(event, context):
     body = json.loads(event["body"])
 
     bucket_name = os.environ.get("CERTIFICATE_BUCKET_NAME")
+    top_domain = utils.get_top_domain(body["fqdn"])
+
+    if utils.is_top_domain(body["fqdn"]):
+        return {
+            "statusCode": 400,
+            "body": json.dumps(
+                {"message": "fqdn must not be a top-level domain."},
+            ),
+        }
+
+    s3_key_root_private_key = f"{top_domain}/root_ca/private_key.pem"
+    s3_key_root_cert = f"{top_domain}/root_ca/certificate.pem"
+
+    if not utils.file_exists_in_s3(
+        bucket_name, s3_key_root_private_key
+    ) or not utils.file_exists_in_s3(bucket_name, s3_key_root_cert):
+        return {
+            "statusCode": 400,
+            "body": json.dumps(
+                {
+                    "message": "Root CA private key and certificate not found. Please create a Root CA first."
+                }
+            ),
+        }
 
     # Fetch Root CA private key and certificate from S3
     root_private_key = s3_client.get_object(
-        Bucket=bucket_name, Key="root_ca/private_key.pem"
+        Bucket=bucket_name, Key=s3_key_root_private_key
     )["Body"].read()
-    root_cert = s3_client.get_object(Bucket=bucket_name, Key="root_ca/certificate.pem")[
+    root_cert = s3_client.get_object(Bucket=bucket_name, Key=s3_key_root_cert)[
         "Body"
     ].read()
 
@@ -116,20 +139,34 @@ def handler(event, context):
 
     s3_client.put_object(
         Bucket=bucket_name,
-        Key="intermediate_ca/private_key.pem",
+        Key=f"{top_domain}/{body['fqdn']}/intermediate_ca/private_key.pem",
         Body=intermediate_private_key_pem,
     )
     s3_client.put_object(
         Bucket=bucket_name,
-        Key="intermediate_ca/certificate.pem",
+        Key=f"{top_domain}/{body['fqdn']}/intermediate_ca/certificate.pem",
         Body=intermediate_cert_pem,
     )
 
     # Upload the certificate chain to S3
     s3_client.put_object(
         Bucket=bucket_name,
-        Key="intermediate_ca/certificate_chain.pem",
+        Key=f"{top_domain}/{body['fqdn']}/intermediate_ca/certificate_chain.pem",
         Body=cert_chain_pem,
+    )
+
+    # Post an event to EventBridge
+    utils.post_event_to_eventbridge(
+        eb_client,
+        os.environ["EVENTBRIDGE_BUS_NAME"],
+        "certificates",
+        "created",
+        {
+            "FQDN": body["fqdn"],
+            "Type": "Intermediate",
+            "ParentFQDN": top_domain,
+            "ValidUntil": utils.get_expiration_date_as_string(body["validity_days"]),
+        },
     )
 
     return {
