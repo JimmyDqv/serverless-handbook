@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Print Cookies</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+      }
+      #cookieDisplay {
+        margin-top: 20px;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        font-family: monospace;
+        background-color: #f4f4f4;
+        padding: 10px;
+        border-radius: 5px;
+        border: 1px solid #ccc;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Cookies Associated with this Page</h1>
+    <button onclick="displayCookies()">Show Cookies</button>
+    <div id="cookieDisplay"></div>
+
+    <script>
+      function displayCookies() {
+        // Get all cookies as a single string
+        const cookies = document.cookie;
+
+        // Display cookies in the div
+        const cookieDisplay = document.getElementById("cookieDisplay");
+
+        if (cookies) {
+          // Split cookies into an array and join them with a newline for separation
+          const cookieArray = cookies.split(";");
+          cookieDisplay.textContent = cookieArray.join("\n");
+        } else {
+          cookieDisplay.textContent = "No cookies found for this page.";
+        }
+      }
+    </script>
+  </body>
+</html>

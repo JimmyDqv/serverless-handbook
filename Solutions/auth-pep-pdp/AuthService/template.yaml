@@ -1,0 +1,65 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: PDP Service
+Parameters:
+  ApplicationName:
+    Type: String
+    Description: Name of owning application
+  UserManagementStackName:
+    Type: String
+    Description: The name of the stack that contains the user management part, e.g the Cognito UserPool
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 2048
+    Architectures:
+      - arm64
+    Runtime: python3.12
+
+Resources:
+  PermissionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName:
+        Fn::Sub: ${ApplicationName}-pdp-role-permission-map
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: PK
+        AttributeType: S
+      - AttributeName: SK
+        AttributeType: S
+      KeySchema:
+      - AttributeName: PK
+        KeyType: HASH
+      - AttributeName: SK
+        KeyType: RANGE
+
+  LambdaPDPFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: Lambda/AuthZ
+      Handler: authz.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref PermissionsTable
+      Environment:
+        Variables:
+          JWKS_URL:
+            Fn::ImportValue: !Sub ${UserManagementStackName}:jwks-url
+          AUDIENCE:
+            Fn::ImportValue: !Sub ${UserManagementStackName}:app-audience
+          PERMISSIONS_TABLE:
+            !Ref PermissionsTable
+
+Outputs:
+  PDPLambdaArn:
+    Value: !GetAtt LambdaPDPFunction.Arn
+    Description: The ARN of the PDP Lambda Function
+    Export:
+      Name: !Sub ${AWS::StackName}:pdp-lambda-arn
+  PDPLambdaName:
+    Value: !Ref LambdaPDPFunction
+    Description: The Name of the PDP Lambda Function
+    Export:
+      Name: !Sub ${AWS::StackName}:pdp-lambda-name

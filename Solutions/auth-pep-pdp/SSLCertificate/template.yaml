@@ -1,0 +1,30 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: Creates SSL certificate for CloudFront Distribution
+Parameters:
+  ApplicationName:
+    Type: String
+    Description: The application that owns this setup.
+  DomainName:
+    Type: String
+    Description: The domain name to use for cloudfront
+  HostedZoneId:
+    Type: String
+    Description: The id for the Route53 hosted zone
+
+Resources:
+
+  SSLCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref DomainName
+      DomainValidationOptions:
+        - DomainName: !Ref DomainName
+          HostedZoneId: !Ref HostedZoneId
+      ValidationMethod: DNS
+
+
+Outputs:
+  SSLCertificateARN:
+    Description: The ARN to the SSL Certificate.
+    Value: !Ref SSLCertificate

@@ -1,0 +1,154 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: Creates the infrastructure for hosting the static content
+Parameters:
+  ApplicationName:
+    Type: String
+    Description: The application that owns this setup.
+  BucketNameSuffix:
+    Type: String
+    Description: The last part of the bucket name. Full name will be {ApplicationName}-{BucketNameSuffix}
+  DomainName:
+    Type: String
+    Description: The domain name to use for cloudfront
+  HostedZoneId:
+    Type: String
+    Description: The id for the Route53 hosted zone
+  SSLCertificateArn:
+    Type: String
+    Description: The ARN to the SSL certificate that exists in ACM in us-east-1
+  SignInFunctionArn:
+    Type: String
+    Description: ARN to the Lambda@Edge Function handling Sign In
+  AuthorizeFunctionArn:
+    Type: String
+    Description: ARN to the Lambda@Edge Function handling Authorize
+  RefreshFunctionArn:
+    Type: String
+    Description: ARN to the Lambda@Edge Function handling Refresh
+  SignOutFunctionArn:
+    Type: String
+    Description: ARN to the Lambda@Edge Function handling Sign Out
+  IndexPathFunctionArn:
+    Type: String
+    Description: ARN to the Lambda@Edge Function handling Index Path changes
+
+Resources:
+  ContentBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      BucketName: !Sub ${ApplicationName}-${BucketNameSuffix}
+      Tags:
+        - Key: Application
+          Value: !Ref ApplicationName
+  ContentBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ContentBucket
+      PolicyDocument:
+        Statement:
+          - Action: s3:GetObject
+            Effect: Allow
+            Resource: !Sub ${ContentBucket.Arn}/*
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}
+
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Description: !Sub OAC for ${ApplicationName}
+        Name: !Sub ${ApplicationName}-oac
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Aliases:
+          - !Ref DomainName
+        Comment: !Sub "Distribution for the ${ApplicationName}"
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: "/404.html"
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - "GET"
+            - "HEAD"
+            - "OPTIONS"
+          Compress: False
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad #Managed Cache Policy 'CachingDisabled'
+          LambdaFunctionAssociations:
+            - EventType: viewer-request
+              LambdaFunctionARN: !Ref AuthorizeFunctionArn
+            - EventType: origin-request
+              LambdaFunctionARN: !Ref IndexPathFunctionArn
+          TargetOriginId: !Sub ${ApplicationName}-dynamic-s3
+          ViewerProtocolPolicy: redirect-to-https
+        CacheBehaviors:
+          - PathPattern: /signin
+            TargetOriginId: lambda-auth-origin
+            ViewerProtocolPolicy: redirect-to-https
+            ForwardedValues:
+              QueryString: true
+            LambdaFunctionAssociations:
+              - EventType: viewer-request
+                LambdaFunctionARN: !Ref SignInFunctionArn
+          - PathPattern: /refresh
+            TargetOriginId: lambda-auth-origin
+            ViewerProtocolPolicy: redirect-to-https
+            ForwardedValues:
+              QueryString: true
+            LambdaFunctionAssociations:
+              - EventType: viewer-request
+                LambdaFunctionARN: !Ref RefreshFunctionArn
+          - PathPattern: /signout
+            TargetOriginId: lambda-auth-origin
+            ViewerProtocolPolicy: redirect-to-https
+            ForwardedValues:
+              QueryString: true
+            LambdaFunctionAssociations:
+              - EventType: viewer-request
+                LambdaFunctionARN: !Ref SignOutFunctionArn
+        DefaultRootObject: index.html
+        Enabled: True
+        Origins:
+          - DomainName: !Sub ${ApplicationName}-${BucketNameSuffix}.s3.amazonaws.com
+            Id: !Sub ${ApplicationName}-dynamic-s3
+            OriginAccessControlId: !GetAtt CloudFrontOAC.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+          - DomainName: !Sub handle-lambda-auth.${DomainName}
+            Id: lambda-auth-origin
+            CustomOriginConfig:
+              OriginProtocolPolicy: match-viewer
+        PriceClass: PriceClass_100
+        ViewerCertificate:
+          AcmCertificateArn: !Ref SSLCertificateArn
+          SslSupportMethod: sni-only
+      Tags:
+        - Key: Application
+          Value: !Ref ApplicationName
+        - Key: Name
+          Value: !Sub ${ApplicationName}
+
+  Route53Record:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      AliasTarget:
+        DNSName: !GetAtt CloudFrontDistribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2 # CloudFront static value
+      Comment: !Sub "Record for ${ApplicationName} cloudfront distribution"
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub ${DomainName}.
+      Type: A

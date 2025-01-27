@@ -1,0 +1,15 @@
+version: 0.1
+default:
+  global:
+    parameters:
+      stack_name: pep-pdp-cognito-pdp-auth-service
+      region: eu-west-1
+      confirm_changeset: false
+      capabilities: CAPABILITY_NAMED_IAM
+      s3_prefix: pep-pdp-cognito-pdp-auth-service
+      resolve_s3: true
+  deploy:
+    parameters:
+      parameter_overrides:
+        - ApplicationName=pep-pdp-cognito
+        - UserManagementStackName=pep-pdp-cognito-user-mgm

@@ -1,0 +1,18 @@
+version: 0.1
+default:
+  global:
+    parameters:
+      stack_name: pep-pdp-cognito-auth-lambda-edge
+      region: us-east-1
+      confirm_changeset: false
+      capabilities: CAPABILITY_NAMED_IAM
+      s3_prefix: pep-pdp-cognito-auth-lambda-edge
+      resolve_s3: true
+  deploy:
+    parameters:
+      parameter_overrides:
+        - ApplicationName=pep-pdp-cognito
+        - DomainName=dashboard.example.com
+        - HostedZoneId=Z0123456789ABCDEFGHIJ
+        - SecretArn=arn:aws:secretsmanager:eu-west-1:<account>:secret:peppdpdemo/UserManagement/UserPoolSecret-<secret>
+        - SsmParametersArn=arn:aws:ssm:eu-west-1:<account>:parameter/pep-pdp-cognito/*

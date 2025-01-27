@@ -1,0 +1,17 @@
+version: 0.1
+default:
+  global:
+    parameters:
+      stack_name: pep-pdp-cognito-user-mgm
+      region: eu-west-1
+      confirm_changeset: false
+      capabilities: CAPABILITY_NAMED_IAM
+      s3_prefix: pep-pdp-cognito-user-mgm
+      resolve_s3: true
+  deploy:
+    parameters:
+      parameter_overrides:
+        - DomainName=dashboard.example.com
+        - ApplicationName=pep-pdp-cognito
+        - HostedAuthDomainPrefix=peppdpdemo
+        - UserPoolSecretName=peppdpdemo/UserManagement/UserPoolSecret

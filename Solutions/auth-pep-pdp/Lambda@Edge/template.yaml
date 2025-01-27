@@ -1,0 +1,198 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: Creates Lambda@Edge functions for handling authentication
+Parameters:
+  ApplicationName:
+    Type: String
+    Description: The application that owns this setup.
+  DomainName:
+    Type: String
+    Description: The domain name to use for cloudfront
+  SecretArn:
+    Type: String
+    Description: The ARN for the user Pool Client Secret in Secrets manager
+  SsmParametersArn:
+    Type: String
+    Description: The ARN for the parameters in SSM
+
+Globals:
+  Function:
+    Timeout: 5
+    MemorySize: 128
+    Runtime: python3.12
+
+Resources:
+  HandleSignInFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      AutoPublishAlias: "true"
+      CodeUri: ./EdgeLambda/SignIn
+      Handler: signin.handler
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - edgelambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref SecretArn
+        - Version: "2012-10-17"
+          Statement:
+            Action:
+              - ssm:GetParameter
+              - ssm:GetParameters
+              - ssm:GetParametersByPath
+            Effect: Allow
+            Resource: !Ref SsmParametersArn
+        - Version: "2012-10-17"
+          Statement:
+            Action:
+              - lambda:GetFunction
+            Effect: Allow
+            Resource: "*"
+
+  AuthorizeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      AutoPublishAlias: "true"
+      CodeUri: ./EdgeLambda/Authorize
+      Handler: auth.handler
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - edgelambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref SecretArn
+        - Version: "2012-10-17"
+          Statement:
+            Action:
+              - ssm:GetParameter
+              - ssm:GetParameters
+              - ssm:GetParametersByPath
+            Effect: Allow
+            Resource: !Ref SsmParametersArn
+        - Version: "2012-10-17"
+          Statement:
+            Action:
+              - lambda:GetFunction
+            Effect: Allow
+            Resource: "*"
+
+  RefreshFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      AutoPublishAlias: "true"
+      CodeUri: ./EdgeLambda/Refresh
+      Handler: refresh.handler
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - edgelambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref SecretArn
+        - Version: "2012-10-17"
+          Statement:
+            Action:
+              - ssm:GetParameter
+              - ssm:GetParameters
+              - ssm:GetParametersByPath
+            Effect: Allow
+            Resource: !Ref SsmParametersArn
+        - Version: "2012-10-17"
+          Statement:
+            Action:
+              - lambda:GetFunction
+            Effect: Allow
+            Resource: "*"
+
+  SignOutFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      AutoPublishAlias: "true"
+      CodeUri: ./EdgeLambda/SignOut
+      Handler: signout.handler
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - edgelambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            Action:
+              - ssm:GetParameter
+              - ssm:GetParameters
+              - ssm:GetParametersByPath
+            Effect: Allow
+            Resource: !Ref SsmParametersArn
+        - Version: "2012-10-17"
+          Statement:
+            Action:
+              - lambda:GetFunction
+            Effect: Allow
+            Resource: "*"
+
+  IndexPathFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      AutoPublishAlias: "true"
+      CodeUri: ./EdgeLambda/HandleMissingIndex
+      Handler: index.handler
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - edgelambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            Action:
+              - lambda:GetFunction
+            Effect: Allow
+            Resource: "*"
+
+Outputs:
+  SignInFunctionARN:
+    Description: The ARN to the Sign In Lambda@Edge Function.
+    Value: !GetAtt HandleSignInFunction.Arn
+  SignOutFunctionArn:
+    Description: The ARN to the Sign Out Lambda@Edge Function.
+    Value: !GetAtt SignOutFunction.Arn
+  AuthorizeFunctionArn:
+    Description: The ARN to the Auth Lambda@Edge Function.
+    Value: !GetAtt AuthorizeFunction.Arn
+  RefreshFunctionArn:
+    Description: The ARN to the Refresh Token Lambda@Edge Function.
+    Value: !GetAtt RefreshFunction.Arn
+  IndexPathFunctionArn:
+    Description: The ARN to the Index Path Lambda@Edge Function.
+    Value: !GetAtt IndexPathFunction.Arn

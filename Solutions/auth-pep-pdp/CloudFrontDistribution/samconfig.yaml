@@ -1,0 +1,23 @@
+version: 0.1
+default:
+  global:
+    parameters:
+      stack_name: pep-pdp-cognito-cloudfront-distribution
+      region: eu-west-1
+      confirm_changeset: false
+      capabilities: CAPABILITY_NAMED_IAM
+      s3_prefix: pep-pdp-cognito-cloudfront-distribution
+      resolve_s3: true
+  deploy:
+    parameters:
+      parameter_overrides:
+        - ApplicationName=pep-pdp-cognito
+        - DomainName=dashboard.example.com
+        - HostedZoneId=Z07862571I40FP1T8A0P1
+        - BucketNameSuffix=dashboard-<unique-id>
+        - SSLCertificateArn=
+        - SignInFunctionArn=
+        - SignOutFunctionArn=
+        - AuthorizeFunctionArn=
+        - RefreshFunctionArn=
+        - IndexPathFunctionArn=

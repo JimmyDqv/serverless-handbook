@@ -1,0 +1,16 @@
+version: 0.1
+default:
+  global:
+    parameters:
+      stack_name: pep-pdp-cognito-dashboard-ssl-certificate
+      region: us-east-1
+      confirm_changeset: false
+      capabilities: CAPABILITY_NAMED_IAM
+      s3_prefix: pep-pdp-cognito-dashboard-ssl-certificate
+      resolve_s3: true
+  deploy:
+    parameters:
+      parameter_overrides:
+        - ApplicationName=pep-pdp-cognito
+        - DomainName=dashboard.example.com
+        - HostedZoneId=Z0123456789ABCDEFGHIJ

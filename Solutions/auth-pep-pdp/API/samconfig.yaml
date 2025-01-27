@@ -1,0 +1,17 @@
+version: 0.1
+default:
+  global:
+    parameters:
+      stack_name: pep-pdp-cognito-api-service
+      region: eu-west-1
+      confirm_changeset: false
+      s3_prefix: pep-pdp-cognito-api-service
+      fail_on_empty_changeset: false
+      resolve_s3: true
+      capabilities: CAPABILITY_IAM
+  deploy:
+    parameters:
+      parameter_overrides:
+        - ApplicationName=pep-pdp-cognito
+        - UserManagementStackName=pep-pdp-cognito-user-mgm
+        - PDPStackName=pep-pdp-cognito-pdp-auth-service
