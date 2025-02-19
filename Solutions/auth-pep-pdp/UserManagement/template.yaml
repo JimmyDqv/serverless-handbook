@@ -133,6 +133,13 @@ Outputs:
   CognitoUserPoolID:
     Value: !Ref UserPool
     Description: The UserPool ID
+    Export:
+      Name: !Sub ${AWS::StackName}:user-pool-id
+  CognitoUserPoolArn:
+    Value: !GetAtt  UserPool.Arn
+    Description: The UserPool ARN
+    Export:
+      Name: !Sub ${AWS::StackName}:user-pool-arn
   CognitoAppClientID:
     Value: !Ref UserPoolClient
     Description: The app client

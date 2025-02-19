@@ -16,17 +16,33 @@ Now, Let's go build!
 
 ## Introduction
 
-In this solution we will implement PDP (Policy Decision Point) and a PEP (Policy Enforcement Point). We will build an simple API and use Amazon API Gateway and Lambda Authorizer as the PEP. The PDP will be implemented as a separate Lambda based service. For authentication Cognito User Pools will be used. As this solution is based on Role Based Access Control (RBAC) the PDP will keep an mapping between Roles (Cognito Groups) and permissions / access to resources, in DynamoDB. 
+In this solution we will implement PDP (Policy Decision Point) and a PEP (Policy Enforcement Point). We will build an simple API and use Amazon API Gateway and Lambda Authorizer as the PEP.
+
+For authentication Cognito User Pools will be used. The PDP can be implemented in two different ways, in both we will implement it as a separate Lambda based service.
+
+In the first solution we will use Role Based Access Control (RBAC) and the PDP will keep an mapping between Roles (Cognito Groups) and permissions / access to resources, in DynamoDB.
+
+In the second solution we will also use Role Based Access Control (RBAC), but the PDP will use Amazon Verified Permissions (AVP) to evaluate access and permissions using Roles (Cognito Groups).
 
 The managed UI will be used for Cognito authentication.
 
-Solution overview:  
+For deep dive into this solution read the two existing blogs on the topic, [Part one - PEP and PDP for Secure Authorization with Cognito](https://jimmydqv.com/pdp-and-pep-in-aws/) [Part two - PEP and PDP for Secure Authorization with AVP](https://jimmydqv.com/pdp-and-pep-in-aws-with-avp/)
+
+### Solution overview RBAC with DynamoDB
 
 ![Image showing the overview.](images/overview.png)
 
 Call Flow:
 
 ![Image showing the cal flow.](images/call-flow.png)
+
+### Solution overview RBAC with AVP
+
+![Image showing the overview.](images/overview-avp.png)
+
+Call Flow:
+
+![Image showing the cal flow.](images/call-flow-avp.png)
 
 ### Cognito callbacks
 
@@ -108,7 +124,7 @@ Copy the simple web page to S3 bucket:
 aws s3 cp index.html s3://<bucket-name-from-distribution>/index.html
 ```
 
-### Deploy Authorization (PDP)
+### Deploy DynamoDB based Authorization (PDP)
 
 Check the values in [AuthService/samconfig.yaml](AuthService/samconfig.yaml) and ensure they match:
 
@@ -119,9 +135,20 @@ sam build
 sam deploy --config-env default --template-file AuthService/template.yaml
 ```
 
+### Deploy AVP based Authorization (PDP)
+
+Check the values in [AuthServiceAVP/samconfig.yaml](AuthServiceAVP/samconfig.yaml) and ensure they match:
+
+Deploy using the SAM CLI:
+
+``` bash
+sam build
+sam deploy --config-env default --template-file AuthServiceAVP/template.yaml
+```
+
 ### Deploy API
 
-Check the values in [API/samconfig.yaml](API/samconfig.yaml) and ensure they are correct:
+Check the values in [API/samconfig.yaml](API/samconfig.yaml) make sure you set the `PDPStackName` to point to the stack for either the DynamoDB based PDP or the AVP based PDP.
 
 Deploy using the SAM CLI:
 
@@ -132,7 +159,7 @@ sam deploy --config-env default --template-file API/template.yaml
 
 ## Test the setup
 
-To test the PEP and PDP create a User, Roles, and Permission mapping
+To test the PEP and PDP create a User, Roles, and depending on solution Permission mapping.
 
 ### Create User
 
@@ -157,7 +184,7 @@ Stay in the Groups section of Cognito UserPool, and click one of the Groups just
 Click on `Add user to group` and select the created user.
 ![Image showing cognito userpool group users](images/cognito-groups-add-user.png)
 
-### Create Permission mapping
+### Create Permission mapping (DynamoDB based PDP only)
 
 navigate to DynamoDB section of the Console. Locate the permissions table and click on that.
 ![Image showing DynamoDB tables](images/dynamodb-tables.png)
@@ -172,6 +199,40 @@ Create a permission mapping, by adding one or several Role - Permission mapping 
 ![Image showing cognito userpool group users](images/dynamodb-table-create-item.png)
 
 The solution support explicit `Allow`, implicit and explicit `Deny`. Make sure to add at least one allow for the Role assigned to the test user.
+
+### Explore AVP policies (AVP based PDP only)
+
+To explore and test the setup of AVP we can navigate to the AVP part of the console.
+
+Under Policy Stores you should see the policy store that was created for our PDP.
+
+![Image showing the policy store list ](images/policy-stores.png)
+
+By clicking on the ID of the policy store and selecting `Policies` in the menu we see the list of the three created policies.
+
+![Image showing the policy list ](images/policies.png)
+
+By selecting the Riders policy we can now inspect the create policy.
+
+![Image showing the policy list ](images/policy-content.png)
+
+By selecting `Schema` in the menu we can inspect the created schema in a visual form.
+
+![Image showing the policy schema ](images/policy-schema.png)
+
+![Image showing the policy schema ](images/schema-entity-actions.png)
+
+Now, we can navigate to the `Test Bench` to test out our policies, fill in the information as shown in the image below. The group must be prefixed with the Cognito User Pool Id and follow pattern `<COGNITO_USER_POOL_ID>|<GROUP_NAME>`
+
+![Image showing the test bench ](images/test-bench-setup.png)
+
+If we select the action `/get trainers` and click `Run Authorization request` we should get a deny back, as the `Trainer` role don't have access to that `Action`
+
+![Image showing the test bench ](images/test-bench-deny.png)
+
+Swapping to the `/get trainer` action should instead give us an allow back.
+
+![Image showing the test bench ](images/test-bench-allow.png)
 
 ### Call API
 

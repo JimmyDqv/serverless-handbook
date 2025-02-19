@@ -40,27 +40,6 @@ Resources:
             RestApiId:
               Ref: UnicornsApi
 
-  LambdaRiderPost:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: index.lambda_handler
-      InlineCode: |
-        import json
-        def lambda_handler(event, context):
-            return {
-        "statusCode": 200,
-        "body": json.dumps({
-          "message" : "Hello from LambdaRiderPost!"}),
-        }
-      Events:
-        PostRider:
-          Type: Api
-          Properties:
-            Path: /rider
-            Method: POST
-            RestApiId:
-              Ref: UnicornsApi
-
   LambdaRiderList:
     Type: AWS::Serverless::Function
     Properties:
@@ -103,27 +82,6 @@ Resources:
             RestApiId:
               Ref: UnicornsApi
 
-  LambdaTrainerPost:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: index.lambda_handler
-      InlineCode: |
-        import json
-        def lambda_handler(event, context):
-            return {
-        "statusCode": 200,
-        "body": json.dumps({
-          "message" : "Hello from LambdaTrainerPost!"}),
-        }
-      Events:
-        PostTrainer:
-          Type: Api
-          Properties:
-            Path: /trainer
-            Method: POST
-            RestApiId:
-              Ref: UnicornsApi
-
   LambdaTrainerList:
     Type: AWS::Serverless::Function
     Properties:
@@ -163,27 +121,6 @@ Resources:
           Properties:
             Path: /unicorn
             Method: GET
-            RestApiId:
-              Ref: UnicornsApi
-
-  LambdaUnicornPost:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: index.lambda_handler
-      InlineCode: |
-        import json
-        def lambda_handler(event, context):
-            return {
-        "statusCode": 200,
-        "body": json.dumps({
-          "message" : "Hello from LambdaUnicornPost!"}),
-        }
-      Events:
-        PostUnicorn:
-          Type: Api
-          Properties:
-            Path: /unicorn
-            Method: POST
             RestApiId:
               Ref: UnicornsApi
 

@@ -1,0 +1,268 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: PDP Service
+Parameters:
+  ApplicationName:
+    Type: String
+    Description: Name of owning application
+  UserManagementStackName:
+    Type: String
+    Description: The name of the stack that contains the user management part, e.g the Cognito UserPool
+  AVPNameSpace:
+    Type: String
+    Description: The name space for Amazon Verified Permissions
+    AllowedPattern: "[a-z]+"
+  UserPoolId:
+    Type: String
+    Description: The ID of the Cognito User Pool
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 2048
+    Architectures:
+      - arm64
+    Runtime: python3.12
+
+Resources:
+
+  PolicyStore:
+    Type: AWS::VerifiedPermissions::PolicyStore
+    Properties:
+      Description: !Sub Policy Store for ${ApplicationName}
+      ValidationSettings:
+        Mode: "OFF"
+      Schema:
+        CedarJson: !Sub |
+          {
+            "${AVPNameSpace}": {
+                "entityTypes": {
+                    "CognitoUser": {
+                        "shape": {
+                            "type": "Record",
+                            "attributes": {}
+                        },
+                        "memberOfTypes": [
+                            "CognitoUserGroup"
+                        ]
+                    },
+                    "CognitoUserGroup": {
+                        "shape": {
+                            "attributes": {},
+                            "type": "Record"
+                        }
+                    },
+                    "Application": {
+                        "shape": {
+                            "attributes": {},
+                            "type": "Record"
+                        }
+                    }
+                },
+                "actions": {
+                    "get /rider": {
+                        "appliesTo": {
+                            "context": {
+                                "type": "Record",
+                                "attributes": {}
+                            },
+                            "principalTypes": [
+                                "CognitoUser"
+                            ],
+                            "resourceTypes": [
+                                "Application"
+                            ]
+                        }
+                    },
+                    "get /riders": {
+                        "appliesTo": {
+                            "context": {
+                                "type": "Record",
+                                "attributes": {}
+                            },
+                            "principalTypes": [
+                                "CognitoUser"
+                            ],
+                            "resourceTypes": [
+                                "Application"
+                            ]
+                        }
+                    },
+                    "get /trainer": {
+                        "appliesTo": {
+                            "context": {
+                                "type": "Record",
+                                "attributes": {}
+                            },
+                            "principalTypes": [
+                                "CognitoUser"
+                            ],
+                            "resourceTypes": [
+                                "Application"
+                            ]
+                        }
+                    },
+                    "get /trainers": {
+                        "appliesTo": {
+                            "context": {
+                                "type": "Record",
+                                "attributes": {}
+                            },
+                            "principalTypes": [
+                                "CognitoUser"
+                            ],
+                            "resourceTypes": [
+                                "Application"
+                            ]
+                        }
+                    },
+                    "get /unicorn": {
+                        "appliesTo": {
+                            "context": {
+                                "type": "Record",
+                                "attributes": {}
+                            },
+                            "principalTypes": [
+                                "CognitoUser"
+                            ],
+                            "resourceTypes": [
+                                "Application"
+                            ]
+                        }
+                    },
+                    "get /unicorns": {
+                        "appliesTo": {
+                            "context": {
+                                "type": "Record",
+                                "attributes": {}
+                            },
+                            "principalTypes": [
+                                "CognitoUser"
+                            ],
+                            "resourceTypes": [
+                                "Application"
+                            ]
+                        }
+                    }
+                }
+            }
+          }
+
+  CognitoIdentitySource:
+    Type: AWS::VerifiedPermissions::IdentitySource
+    Properties:
+      Configuration: 
+        CognitoUserPoolConfiguration: 
+          ClientIds: 
+            - Fn::ImportValue: !Sub ${UserManagementStackName}:app-audience
+          GroupConfiguration: 
+            GroupEntityType: !Sub ${AVPNameSpace}::CognitoUserGroup
+          UserPoolArn: 
+            Fn::ImportValue: !Sub ${UserManagementStackName}:user-pool-arn
+      PolicyStoreId: !Ref PolicyStore
+      PrincipalEntityType: !Sub ${AVPNameSpace}::CognitoUser
+
+  AdminUserPolicy:
+    Type: AWS::VerifiedPermissions::Policy
+    Properties:
+      Definition:
+        Static:
+          Description: Policy for Admin User group in Cognito
+          Statement: !Sub |
+            permit(
+              principal in ${AVPNameSpace}::CognitoUserGroup::"${UserPoolId}|Admin", 
+              action in [ ${AVPNameSpace}::Action::"get /rider", ${AVPNameSpace}::Action::"get /riders", ${AVPNameSpace}::Action::"get /trainer", ${AVPNameSpace}::Action::"get /trainers", ${AVPNameSpace}::Action::"get /unicorn", ${AVPNameSpace}::Action::"get /unicorns" ], 
+              resource
+            );
+      PolicyStoreId: !Ref PolicyStore
+
+  TrainerUserPolicy:
+    Type: AWS::VerifiedPermissions::Policy
+    Properties:
+      Definition:
+        Static:
+          Description: Policy for Trainers User group in Cognito
+          Statement: !Sub |
+            permit(
+              principal in ${AVPNameSpace}::CognitoUserGroup::"${UserPoolId}|Trainer", 
+              action in [ ${AVPNameSpace}::Action::"get /rider", ${AVPNameSpace}::Action::"get /riders", ${AVPNameSpace}::Action::"get /trainer", ${AVPNameSpace}::Action::"get /unicorn", ${AVPNameSpace}::Action::"get /unicorns" ], 
+              resource
+            );
+      PolicyStoreId: !Ref PolicyStore
+
+  RiderUserPolicy:
+    Type: AWS::VerifiedPermissions::Policy
+    Properties:
+      Definition:
+        Static:
+          Description: Policy for Riders User group in Cognito
+          Statement: !Sub |
+            permit(
+              principal in ${AVPNameSpace}::CognitoUserGroup::"${UserPoolId}|Rider", 
+              action in [ ${AVPNameSpace}::Action::"get /rider", ${AVPNameSpace}::Action::"get /trainer", ${AVPNameSpace}::Action::"get /unicorn" ],
+              resource
+            );
+      PolicyStoreId: !Ref PolicyStore
+
+
+  LambdaPDPFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: Lambda/AuthZ
+      Handler: authz.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AVPCacheTable
+        - Version: "2012-10-17"
+          Statement:
+            Effect: Allow
+            Action:
+              - "verifiedpermissions:EvaluatePolicy"
+              - "verifiedpermissions:GetPolicy"
+              - "verifiedpermissions:IsAuthorizedWithToken"
+            Resource: "*"
+      Environment:
+        Variables:
+          JWKS_URL:
+            Fn::ImportValue: !Sub ${UserManagementStackName}:jwks-url
+          AUDIENCE:
+            Fn::ImportValue: !Sub ${UserManagementStackName}:app-audience
+          POLICY_STORE_ID:
+            !Ref PolicyStore
+          NAMESPACE:
+            !Ref AVPNameSpace
+          TOKEN_TYPE: "accessToken"
+          PERMISSION_CACHE_TABLE:
+            !Ref AVPCacheTable
+
+  AVPCacheTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName:
+        Fn::Sub: ${ApplicationName}-pdp-avp-permission-cache
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: PK
+        AttributeType: S
+      - AttributeName: SK
+        AttributeType: S
+      KeySchema:
+      - AttributeName: PK
+        KeyType: HASH
+      - AttributeName: SK
+        KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: TTL
+        Enabled: true
+
+Outputs:
+  PDPLambdaArn:
+    Value: !GetAtt LambdaPDPFunction.Arn
+    Description: The ARN of the PDP Lambda Function
+    Export:
+      Name: !Sub ${AWS::StackName}:pdp-lambda-arn
+  PDPLambdaName:
+    Value: !Ref LambdaPDPFunction
+    Description: The Name of the PDP Lambda Function
+    Export:
+      Name: !Sub ${AWS::StackName}:pdp-lambda-name
