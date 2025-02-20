@@ -26,7 +26,11 @@ In the second solution we will also use Role Based Access Control (RBAC), but th
 
 The managed UI will be used for Cognito authentication.
 
-For deep dive into this solution read the two existing blogs on the topic, [Part one - PEP and PDP for Secure Authorization with Cognito](https://jimmydqv.com/pdp-and-pep-in-aws/) [Part two - PEP and PDP for Secure Authorization with AVP](https://jimmydqv.com/pdp-and-pep-in-aws-with-avp/)
+For deep dive into this solution read the two existing blogs on the topic.
+
+[Part one - PEP and PDP for Secure Authorization with Cognito](https://jimmydqv.com/pdp-and-pep-in-aws/) 
+
+[Part two - PEP and PDP for Secure Authorization with AVP](https://jimmydqv.com/pdp-and-pep-in-aws-with-avp/)
 
 ### Solution overview RBAC with DynamoDB
 
