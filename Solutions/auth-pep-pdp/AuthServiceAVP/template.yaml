@@ -64,7 +64,12 @@ Resources:
                         "appliesTo": {
                             "context": {
                                 "type": "Record",
-                                "attributes": {}
+                                "attributes": {
+                                    "dataAccess": {
+                                        "type": "String",
+                                        "required": true
+                                    }
+                                }
                             },
                             "principalTypes": [
                                 "CognitoUser"
@@ -78,7 +83,12 @@ Resources:
                         "appliesTo": {
                             "context": {
                                 "type": "Record",
-                                "attributes": {}
+                                "attributes": {
+                                    "dataAccess": {
+                                        "type": "String",
+                                        "required": true
+                                    }
+                                }
                             },
                             "principalTypes": [
                                 "CognitoUser"
@@ -92,7 +102,12 @@ Resources:
                         "appliesTo": {
                             "context": {
                                 "type": "Record",
-                                "attributes": {}
+                                "attributes": {
+                                    "dataAccess": {
+                                        "type": "String",
+                                        "required": true
+                                    }
+                                }
                             },
                             "principalTypes": [
                                 "CognitoUser"
@@ -106,7 +121,12 @@ Resources:
                         "appliesTo": {
                             "context": {
                                 "type": "Record",
-                                "attributes": {}
+                                "attributes": {
+                                    "dataAccess": {
+                                        "type": "String",
+                                        "required": true
+                                    }
+                                }
                             },
                             "principalTypes": [
                                 "CognitoUser"
@@ -120,7 +140,12 @@ Resources:
                         "appliesTo": {
                             "context": {
                                 "type": "Record",
-                                "attributes": {}
+                                "attributes": {
+                                    "dataAccess": {
+                                        "type": "String",
+                                        "required": true
+                                    }
+                                }
                             },
                             "principalTypes": [
                                 "CognitoUser"
@@ -134,7 +159,69 @@ Resources:
                         "appliesTo": {
                             "context": {
                                 "type": "Record",
-                                "attributes": {}
+                                "attributes": {
+                                    "dataAccess": {
+                                        "type": "String",
+                                        "required": true
+                                    }
+                                }
+                            },
+                            "principalTypes": [
+                                "CognitoUser"
+                            ],
+                            "resourceTypes": [
+                                "Application"
+                            ]
+                        }
+                    },
+                    "get /races": {
+                        "appliesTo": {
+                            "context": {
+                                "type": "Record",
+                                "attributes": {
+                                    "dataAccess": {
+                                        "type": "String",
+                                        "required": true
+                                    }
+                                }
+                            },
+                            "principalTypes": [
+                                "CognitoUser"
+                            ],
+                            "resourceTypes": [
+                                "Application"
+                            ]
+                        }
+                    },
+                    "get /race": {
+                        "appliesTo": {
+                            "context": {
+                                "type": "Record",
+                                "attributes": {
+                                    "dataAccess": {
+                                        "type": "String",
+                                        "required": true
+                                    }
+                                }
+                            },
+                            "principalTypes": [
+                                "CognitoUser"
+                            ],
+                            "resourceTypes": [
+                                "Application"
+                            ]
+                        }
+                    },
+                    "get /race/results": {
+                        "appliesTo": {
+                            "context": {
+                                "type": "Record",
+                                "attributes": {
+                                    "dataAccess": {
+                                        "type": "String",
+                                        "required": true
+                                    }
+                                }
                             },
                             "principalTypes": [
                                 "CognitoUser"
@@ -167,13 +254,29 @@ Resources:
     Properties:
       Definition:
         Static:
-          Description: Policy for Admin User group in Cognito
+          Description: Policy for Admin in Cognito
           Statement: !Sub |
             permit(
-              principal in ${AVPNameSpace}::CognitoUserGroup::"${UserPoolId}|Admin", 
-              action in [ ${AVPNameSpace}::Action::"get /rider", ${AVPNameSpace}::Action::"get /riders", ${AVPNameSpace}::Action::"get /trainer", ${AVPNameSpace}::Action::"get /trainers", ${AVPNameSpace}::Action::"get /unicorn", ${AVPNameSpace}::Action::"get /unicorns" ], 
+              principal in ${AVPNameSpace}::CognitoUserGroup::"${UserPoolId}|Admin",
+              action in [
+                ${AVPNameSpace}::Action::"get /rider",
+                ${AVPNameSpace}::Action::"get /riders",
+                ${AVPNameSpace}::Action::"get /trainer",
+                ${AVPNameSpace}::Action::"get /trainers",
+                ${AVPNameSpace}::Action::"get /unicorn",
+                ${AVPNameSpace}::Action::"get /unicorns",
+                ${AVPNameSpace}::Action::"get /races",
+                ${AVPNameSpace}::Action::"get /race",
+                ${AVPNameSpace}::Action::"get /race/results"
+              ],
               resource
-            );
+            )
+            when {
+              context.dataAccess == "" ||
+              (context.token has "custom:dataAccess" &&
+              context.token["custom:dataAccess"].contains(context.dataAccess))
+            };
+
       PolicyStoreId: !Ref PolicyStore
 
   TrainerUserPolicy:
@@ -185,9 +288,22 @@ Resources:
           Statement: !Sub |
             permit(
               principal in ${AVPNameSpace}::CognitoUserGroup::"${UserPoolId}|Trainer", 
-              action in [ ${AVPNameSpace}::Action::"get /rider", ${AVPNameSpace}::Action::"get /riders", ${AVPNameSpace}::Action::"get /trainer", ${AVPNameSpace}::Action::"get /unicorn", ${AVPNameSpace}::Action::"get /unicorns" ], 
+              action in [
+                ${AVPNameSpace}::Action::"get /rider",
+                ${AVPNameSpace}::Action::"get /riders",
+                ${AVPNameSpace}::Action::"get /trainer",
+                ${AVPNameSpace}::Action::"get /unicorn",
+                ${AVPNameSpace}::Action::"get /unicorns",
+                ${AVPNameSpace}::Action::"get /races",
+                ${AVPNameSpace}::Action::"get /race"
+              ],
               resource
-            );
+            )
+            when {
+              context.dataAccess == "" ||
+              (context.token has "custom:dataAccess" &&
+              context.token["custom:dataAccess"].contains(context.dataAccess))
+            };
       PolicyStoreId: !Ref PolicyStore
 
   RiderUserPolicy:
@@ -199,11 +315,22 @@ Resources:
           Statement: !Sub |
             permit(
               principal in ${AVPNameSpace}::CognitoUserGroup::"${UserPoolId}|Rider", 
-              action in [ ${AVPNameSpace}::Action::"get /rider", ${AVPNameSpace}::Action::"get /trainer", ${AVPNameSpace}::Action::"get /unicorn" ],
+              action in [
+                ${AVPNameSpace}::Action::"get /rider",
+                ${AVPNameSpace}::Action::"get /trainer",
+                ${AVPNameSpace}::Action::"get /unicorn",
+                ${AVPNameSpace}::Action::"get /races",
+                ${AVPNameSpace}::Action::"get /race",
+                ${AVPNameSpace}::Action::"get /race/results"
+              ],
               resource
-            );
+            )
+            when {
+              context.dataAccess == "" ||
+              (context.token has "custom:dataAccess" &&
+              context.token["custom:dataAccess"].contains(context.dataAccess))
+            };
       PolicyStoreId: !Ref PolicyStore
-
 
   LambdaPDPFunction:
     Type: AWS::Serverless::Function

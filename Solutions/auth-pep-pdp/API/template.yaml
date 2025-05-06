@@ -15,44 +15,67 @@ Parameters:
 Globals:
   Function:
     Timeout: 5
-    MemorySize: 512
+    MemorySize: 1024
     Runtime: python3.12
 
 Resources:
-  LambdaRiderGet:
+  UnicornDataTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${ApplicationName}-unicorn-data
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      Tags:
+        - Key: Data
+          Value: Unicorn
+
+  RaceDataTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${ApplicationName}-race-data
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      Tags:
+        - Key: Data
+          Value: Races
+
+  LambdaRider:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: index.lambda_handler
-      InlineCode: |
-        import json
-        def lambda_handler(event, context):
-            return {
-        "statusCode": 200,
-        "body": json.dumps({
-          "message" : "Hello from LambdaRiderGet!"}),
-        }
+      Handler: index.handler
+      CodeUri: Lambda/Rider/
+      Environment:
+        Variables:
+          UNICORN_TABLE_NAME: !Ref UnicornDataTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref UnicornDataTable
       Events:
-        GetRidet:
+        GetRider:
           Type: Api
           Properties:
             Path: /rider
             Method: GET
             RestApiId:
               Ref: UnicornsApi
-
-  LambdaRiderList:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: index.lambda_handler
-      InlineCode: |
-        import json
-        def lambda_handler(event, context):
-            return {
-        "statusCode": 200,
-        "body": json.dumps({
-          "message" : "Hello from LambdaRiderList!"}),
-        }
-      Events:
         ListRiders:
           Type: Api
           Properties:
@@ -61,18 +84,17 @@ Resources:
             RestApiId:
               Ref: UnicornsApi
 
-  LambdaTrainerGet:
+  LambdaTrainer:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: index.lambda_handler
-      InlineCode: |
-        import json
-        def lambda_handler(event, context):
-            return {
-        "statusCode": 200,
-        "body": json.dumps({
-          "message" : "Hello from LambdaTrainerGet!"}),
-        }
+      Handler: index.handler
+      CodeUri: Lambda/Trainer/
+      Environment:
+        Variables:
+          UNICORN_TABLE_NAME: !Ref UnicornDataTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref UnicornDataTable
       Events:
         GetTrainer:
           Type: Api
@@ -81,66 +103,74 @@ Resources:
             Method: GET
             RestApiId:
               Ref: UnicornsApi
-
-  LambdaTrainerList:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: index.lambda_handler
-      InlineCode: |
-        import json
-        def lambda_handler(event, context):
-            return {
-        "statusCode": 200,
-        "body": json.dumps({
-          "message" : "Hello from LambdaTrainerList!"}),
-        }
-      Events:
         ListTrainers:
           Type: Api
           Properties:
             Path: /trainers
-            Method: get
+            Method: GET
             RestApiId:
               Ref: UnicornsApi
 
-  LambdaUnicornGet:
+  LambdaUnicorn:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: index.lambda_handler
-      InlineCode: |
-        import json
-        def lambda_handler(event, context):
-            return {
-        "statusCode": 200,
-        "body": json.dumps({
-          "message" : "Hello from LambdaUnicornGet!"}),
-        }
+      Handler: index.handler
+      CodeUri: Lambda/Unicorn/
+      Environment:
+        Variables:
+          UNICORN_TABLE_NAME: !Ref UnicornDataTable
+          RACE_TABLE_NAME: !Ref RaceDataTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref UnicornDataTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref RaceDataTable
       Events:
-        HelloGetUnicornWorld:
+        GetUnicorn:
           Type: Api
           Properties:
             Path: /unicorn
             Method: GET
             RestApiId:
               Ref: UnicornsApi
-
-  LambdaUnicornList:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: index.lambda_handler
-      InlineCode: |
-        import json
-        def lambda_handler(event, context):
-            return {
-        "statusCode": 200,
-        "body": json.dumps({
-          "message" : "Hello from LambdaUnicornList!"}),
-        }
-      Events:
         ListUnicorns:
           Type: Api
           Properties:
             Path: /unicorns
+            Method: GET
+            RestApiId:
+              Ref: UnicornsApi
+
+  LambdaRace:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      CodeUri: Lambda/Race/
+      Environment:
+        Variables:
+          RACE_TABLE_NAME: !Ref RaceDataTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref RaceDataTable
+      Events:
+        ListRaces:
+          Type: Api
+          Properties:
+            Path: /races
+            Method: GET
+            RestApiId:
+              Ref: UnicornsApi
+        GetRace:
+          Type: Api
+          Properties:
+            Path: /race
+            Method: GET
+            RestApiId:
+              Ref: UnicornsApi
+        GetRaceResults:
+          Type: Api
+          Properties:
+            Path: /race/results
             Method: GET
             RestApiId:
               Ref: UnicornsApi
@@ -167,7 +197,7 @@ Resources:
             Identity: 
               Headers: 
                 - Authorization
-              ReauthorizeEvery: 600
+              ReauthorizeEvery: 0
         DefaultAuthorizer: LambdaRequestAuthorizer
 
   LambdaApiAuthorizer:
@@ -187,3 +217,25 @@ Resources:
             Fn::ImportValue: !Sub ${UserManagementStackName}:app-audience
           PDP_AUTHZ_ENDPOINT: 
             Fn::ImportValue: !Sub ${PDPStackName}:pdp-lambda-name
+
+Outputs:
+  ApiEndpoint:
+    Description: The endpoint URL of the API
+    Value: !Sub "https://${UnicornsApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
+    Export:
+      Name: !Sub "${AWS::StackName}:api-endpoint"
+  ApiId:
+    Description: The ID of the API
+    Value: !Ref UnicornsApi
+    Export:
+      Name: !Sub "${AWS::StackName}:api-id"
+  UnicornDataTableName:
+    Description: Name of the Unicorn Data DynamoDB table
+    Value: !Ref UnicornDataTable
+    Export:
+      Name: !Sub "${AWS::StackName}:unicorn-data-table"
+  RaceDataTableName:
+    Description: Name of the Race Data DynamoDB table
+    Value: !Ref RaceDataTable
+    Export:
+      Name: !Sub "${AWS::StackName}:race-data-table"

@@ -46,7 +46,15 @@ Call Flow:
 
 Call Flow:
 
-![Image showing the cal flow.](images/call-flow-avp.png)
+![Image showing the call flow.](images/call-flow-avp.png)
+
+### Solution overview RBAC + ABAC with AVP
+
+![Image showing the overview.](images/overview-avp-abac.png)
+
+Call Flow:
+
+![Image showing the call flow.](images/call-flow-avp-abac.png)
 
 ### Cognito callbacks
 
@@ -187,6 +195,10 @@ Create at least one Group that can match a Role, e.g. `Admin`, `Trainer`, `Rider
 Stay in the Groups section of Cognito UserPool, and click one of the Groups just created.
 Click on `Add user to group` and select the created user.
 ![Image showing cognito userpool group users](images/cognito-groups-add-user.png)
+
+### Add dataAccess attribute to user (ABAC only)
+
+Lorem Ipsum
 
 ### Create Permission mapping (DynamoDB based PDP only)
 

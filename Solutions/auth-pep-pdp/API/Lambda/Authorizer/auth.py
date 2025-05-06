@@ -35,10 +35,13 @@ def handler(event, context):
         if decoded_token["client_id"] != os.environ["AUDIENCE"]:
             raise Exception("Unauthorized: Invalid audience")
 
+        resource_tags = get_resource_tags_for_path(path)
+
         data = {
             "jwt_token": token,
             "resource": path,
             "action": method,
+            "resource_tags": resource_tags,
         }
 
         response = lambda_client.invoke(
@@ -51,6 +54,8 @@ def handler(event, context):
         body = json.loads(response_payload["body"])
         effect = body["effect"]
 
+        print(f"Authorization decision: {effect}, Resource Tags: {resource_tags}")
+
         return generate_policy(
             decoded_token["sub"], effect, event["methodArn"], decoded_token
         )
@@ -59,8 +64,24 @@ def handler(event, context):
         print(f"Authorization error: {str(e)}")
 
     return generate_policy(
-        decoded_token["sub"], "Deny", event["methodArn"], decoded_token
+        decoded_token["sub"] if decoded_token else "unknown",
+        "Deny",
+        event["methodArn"],
+        decoded_token,
     )
+
+
+def get_resource_tags_for_path(path):
+    if (
+        path.startswith("/unicorn")
+        or path.startswith("/rider")
+        or path.startswith("/trainer")
+    ):
+        return {"Data": "Unicorn"}
+    elif path.startswith("/race"):
+        return {"Data": "Races"}
+    else:
+        return {}
 
 
 def generate_policy(principal_id, effect, resource, context):

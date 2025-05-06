@@ -16,6 +16,27 @@ Parameters:
     Description: The name that will be used in Secrets manager to store the User Pool Secret
 
 Resources:
+  PreTokenGenerationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: Lambda/PreTokenGeneration
+      Handler: index.handler
+      Runtime: python3.12
+      Architectures:
+        - x86_64
+      MemorySize: 128
+      Description: A Lambda function that adds custom attributes to the JWT access token
+      Policies:
+        - AWSLambdaBasicExecutionRole
+
+  PreTokenGenerationPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt PreTokenGenerationFunction.Arn
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !GetAtt UserPool.Arn
+
   UserPool:
     Type: AWS::Cognito::UserPool
     Properties:
@@ -33,6 +54,14 @@ Resources:
           AttributeDataType: String
           Mutable: true
           Required: true
+        - Name: dataAccess
+          AttributeDataType: String
+          Mutable: true
+          Required: false
+      LambdaConfig:
+        PreTokenGenerationConfig:
+          LambdaArn: !GetAtt PreTokenGenerationFunction.Arn
+          LambdaVersion: V2_0
 
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
@@ -52,6 +81,14 @@ Resources:
         - profile
       SupportedIdentityProviders:
         - COGNITO
+      ReadAttributes:
+        - email
+        - name
+        - custom:dataAccess
+      WriteAttributes:
+        - email
+        - name
+        - custom:dataAccess
 
   HostedUserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain
