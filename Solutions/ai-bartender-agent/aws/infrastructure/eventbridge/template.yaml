@@ -1,0 +1,28 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: AI Bartender Custom EventBridge Event Bus
+
+Parameters:
+  Application:
+    Type: String
+    Default: ai-bartender
+
+Resources:
+  AiBartenderEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub '${Application}-events'
+      Description: Custom event bus for AI Bartender application events
+
+Outputs:
+  EventBusName:
+    Description: Name of the custom event bus
+    Value: !Ref AiBartenderEventBus
+    Export:
+      Name: !Sub '${AWS::StackName}:event-bus-name'
+
+  EventBusArn:
+    Description: ARN of the custom event bus
+    Value: !GetAtt AiBartenderEventBus.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}:event-bus-arn'

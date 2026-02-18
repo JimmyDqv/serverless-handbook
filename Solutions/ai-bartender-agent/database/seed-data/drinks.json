@@ -1,0 +1,336 @@
+{
+    "menu": {
+        "title": "AI Bartender Drink Menu",
+        "sections": [
+            {
+                "name": "Festive",
+                "drinks": [
+                    {
+                        "name": "French 75",
+                        "description": "An elegant and festive champagne cocktail with gin, citrus and sparkling bubbles - perfect for celebrating",
+                        "image": "ea3199da-d8a9-4f4a-8c1f-863cf2a7bad1.png",
+                        "ingredients": [
+                            { "item": "Gin", "amount_cl": 4 },
+                            { "item": "Lemon juice", "amount_cl": 2 },
+                            { "item": "Simple syrup", "amount_cl": 2 },
+                            { "item": "Prosecco", "amount_cl": "top up" }
+                        ],
+                        "method": "Shake gin, lemon juice and simple syrup with ice. Strain into glass and top with prosecco."
+                    },
+                    {
+                        "name": "Limoncello Spritz",
+                        "description": "A light and refreshing Italian aperitif with the sweet taste of lemon and sparkling prosecco",
+                        "image": "832508d3-7d91-44c8-b371-7bec9aee69a7.png",
+                        "ingredients": [
+                            { "item": "Limoncello", "amount_cl": 5 },
+                            { "item": "Prosecco", "amount_cl": "top up" },
+                            { "item": "Soda (optional)", "amount_cl": "splash" }
+                        ],
+                        "method": "Build in glass with ice. Top with prosecco and optionally soda."
+                    },
+                    {
+                        "name": "Negroni Sbagliato",
+                        "description": "The 'mistaken' Negroni where gin is replaced with prosecco - a lighter and more festive version",
+                        "image": "b7788b4c-58c4-48ea-8a68-468a5ab62f4d.png",
+                        "ingredients": [
+                            { "item": "Campari", "amount_cl": 3 },
+                            { "item": "Sweet vermouth", "amount_cl": 3 },
+                            { "item": "Prosecco", "amount_cl": "top up" }
+                        ],
+                        "method": "Stir Campari and vermouth with ice. Strain into glass and top with prosecco."
+                    },
+                    {
+                        "name": "Espresso Martini",
+                        "description": "An intense and creamy cocktail combining vodka with fresh espresso - the perfect end to a dinner",
+                        "image": "be937ceb-91af-44a2-a9c7-86c4fe7d6228.png",
+                        "ingredients": [
+                            { "item": "Vodka", "amount_cl": 4 },
+                            { "item": "Coffee liqueur", "amount_cl": 3 },
+                            { "item": "Espresso", "amount_cl": 4 }
+                        ],
+                        "method": "Shake all ingredients hard with ice. Strain into a chilled glass."
+                    },
+                    {
+                        "name": "White Negroni Royale",
+                        "description": "An elegant twist on the classic Negroni, with lighter notes of gin and limoncello topped with sparkling wine",
+                        "image": "e39d7c34-7d56-40cc-81c8-1a3e6c8def8b.png",
+                        "ingredients": [
+                            { "item": "Gin", "amount_cl": 3 },
+                            { "item": "Limoncello", "amount_cl": 2 },
+                            { "item": "Dry vermouth", "amount_cl": 2 },
+                            { "item": "Prosecco", "amount_cl": "top up" }
+                        ],
+                        "method": "Stir gin, limoncello and vermouth with ice. Strain into glass and top with prosecco."
+                    }
+                ]
+            },
+            {
+                "name": "Classics",
+                "drinks": [
+                    {
+                        "name": "Gimlet",
+                        "description": "A classic gin-based cocktail with fresh lime - simple, elegant and refreshing",
+                        "image": "04139b97-b707-413c-98b6-67a710cbd650.png",
+                        "ingredients": [
+                            { "item": "Gin", "amount_cl": 5 },
+                            { "item": "Lime juice", "amount_cl": 3 },
+                            { "item": "Simple syrup", "amount_cl": 2 }
+                        ],
+                        "method": "Shake hard with ice and strain into a chilled cocktail glass without ice."
+                    },
+                    {
+                        "name": "Gin Sour",
+                        "description": "A classic sour with gin as the base - fresh citrus tartness balanced with sweetness",
+                        "image": "479f562a-5c08-4a71-9e5e-a8bd325f1016.png",
+                        "ingredients": [
+                            { "item": "Gin", "amount_cl": 5 },
+                            { "item": "Lemon juice", "amount_cl": 3 },
+                            { "item": "Simple syrup", "amount_cl": 2 }
+                        ],
+                        "method": "Shake all ingredients with ice and serve over ice."
+                    },
+                    {
+                        "name": "Whiskey Sour",
+                        "description": "An American classic with bourbon whiskey - sweet, sour and smooth in flavor",
+                        "image": "69cddb7c-29d6-48f0-9550-0ddb2435c5b5.png",
+                        "ingredients": [
+                            { "item": "Bourbon", "amount_cl": 5 },
+                            { "item": "Lemon juice", "amount_cl": 3 },
+                            { "item": "Simple syrup", "amount_cl": 2 }
+                        ],
+                        "method": "Shake all ingredients with ice and serve over ice."
+                    },
+                    {
+                        "name": "Americano",
+                        "description": "An Italian aperitif with Campari and sweet vermouth - light, bitter and perfect as an aperitif",
+                        "image": "6da583de-dc7d-4025-97af-f62d07ef421d.png",
+                        "ingredients": [
+                            { "item": "Campari", "amount_cl": 3 },
+                            { "item": "Sweet vermouth", "amount_cl": 3 },
+                            { "item": "Soda", "amount_cl": "top up" }
+                        ],
+                        "method": "Build in glass with ice. Stir gently and top with soda."
+                    },
+                    {
+                        "name": "Negroni",
+                        "description": "A timeless Italian cocktail with perfect balance between bitterness, sweetness and botanical notes",
+                        "image": "80d526aa-aab0-4fe6-bf7c-a3c3324cf673.png",
+                        "ingredients": [
+                            { "item": "Gin", "amount_cl": 3 },
+                            { "item": "Campari", "amount_cl": 3 },
+                            { "item": "Sweet vermouth", "amount_cl": 3 }
+                        ],
+                        "method": "Stir with ice and serve over a large ice cube."
+                    },
+                    {
+                        "name": "Boulevardier",
+                        "description": "A classic and robust cocktail with bourbon, Campari and sweet vermouth - bitter, sweet and refined",
+                        "image": "b6037022-4aa7-44f1-b53a-c7f508b074f4.png",
+                        "ingredients": [
+                            { "item": "Bourbon", "amount_cl": 3 },
+                            { "item": "Campari", "amount_cl": 3 },
+                            { "item": "Sweet vermouth", "amount_cl": 3 }
+                        ],
+                        "method": "Stir all ingredients with ice and strain into a glass with a large ice cube."
+                    },
+                    {
+                        "name": "Amaretto Sour",
+                        "description": "A sweet and almond-flavored member of the sour family - smooth and easy-drinking",
+                        "image": "fbe59ba6-7143-4d6d-8b75-9d5579198c69.png",
+                        "ingredients": [
+                            { "item": "Amaretto", "amount_cl": 5 },
+                            { "item": "Lemon juice", "amount_cl": 3 },
+                            { "item": "Simple syrup", "amount_cl": 2 }
+                        ],
+                        "method": "Shake all ingredients with ice and serve over ice."
+                    }
+                ]
+            },
+            {
+                "name": "Crowd Favorites",
+                "drinks": [
+                    {
+                        "name": "Gin & Tonic",
+                        "description": "A timeless classic with gin and tonic - refreshing and aromatic",
+                        "image": "0a53c1f8-7d94-428b-a60a-5a57b89298df.png",
+                        "ingredients": [
+                            { "item": "Gin", "amount_cl": 5 },
+                            { "item": "Tonic", "amount_cl": "top up" }
+                        ],
+                        "method": "Build in glass with plenty of ice and stir."
+                    },
+                    {
+                        "name": "Espresso & Tonic",
+                        "description": "A modern and surprising combination of coffee and tonic - refreshing with a caffeine kick",
+                        "image": "1b297823-fd3e-4e52-b7e5-6cdc86dbf9c5.png",
+                        "ingredients": [
+                            { "item": "Vodka", "amount_cl": 4 },
+                            { "item": "Coffee liqueur", "amount_cl": 2 },
+                            { "item": "Tonic", "amount_cl": "top up" }
+                        ],
+                        "method": "Build in glass with ice and top with tonic."
+                    },
+                    {
+                        "name": "Moscow Mule",
+                        "description": "A spicy and refreshing cocktail with vodka and ginger beer - traditionally served in a copper mug",
+                        "image": "677a7bba-c49f-4621-bf38-dbd572844469.png",
+                        "ingredients": [
+                            { "item": "Vodka", "amount_cl": 5 },
+                            { "item": "Lime juice", "amount_cl": 2 },
+                            { "item": "Ginger beer", "amount_cl": "top up" }
+                        ],
+                        "method": "Build in glass with plenty of ice and top with ginger beer."
+                    },
+                    {
+                        "name": "Old Cuban",
+                        "description": "An elegant rum-based cocktail with fresh lime juice and sparkling prosecco - the perfect party drink",
+                        "image": "c894d358-35c0-49ab-9bc3-75391b834e93.png",
+                        "ingredients": [
+                            { "item": "Dark rum", "amount_cl": 4 },
+                            { "item": "Lime juice", "amount_cl": 2 },
+                            { "item": "Simple syrup", "amount_cl": 2 },
+                            { "item": "Prosecco", "amount_cl": "top up" }
+                        ],
+                        "method": "Shake rum, lime and simple syrup with ice. Strain into a chilled glass and top with prosecco."
+                    },
+                    {
+                        "name": "Dark Rum & Lime",
+                        "description": "A simple yet flavorful drink with dark rum and lime - tropical and fresh",
+                        "image": "ec1576eb-3d19-4a63-9a82-c0eb5e9e1ee9.png",
+                        "ingredients": [
+                            { "item": "Dark rum", "amount_cl": 5 },
+                            { "item": "Lime juice", "amount_cl": 2 },
+                            { "item": "Simple syrup", "amount_cl": "1-2 cl" }
+                        ],
+                        "method": "Build in glass with ice and stir gently."
+                    },
+                    {
+                        "name": "Limoncello Gin Collins",
+                        "description": "A light and lemony cocktail with gin and sweet limoncello - refreshing and elegant",
+                        "image": "e7e383d6-d7e5-4614-838a-8b782b5b53a6.png",
+                        "ingredients": [
+                            { "item": "Gin", "amount_cl": 3 },
+                            { "item": "Limoncello", "amount_cl": 2 },
+                            { "item": "Lemon juice", "amount_cl": 2 },
+                            { "item": "Soda", "amount_cl": "top up" }
+                        ],
+                        "method": "Shake gin, limoncello and lemon juice with ice. Strain into a tall glass with ice and top with soda."
+                    }
+                ]
+            },
+            {
+                "name": "Special",
+                "drinks": [
+                    {
+                        "name": "Apple Pie",
+                        "description": "A creative and flavorful drink that captures the flavors of classic apple pie with cinnamon and apple",
+                        "image": "fad95af0-70a3-42ed-aab0-8f05f64db0e6.png",
+                        "ingredients": [
+                            { "item": "Vodka", "amount_cl": 6 },
+                            { "item": "Cinnamon syrup", "amount_cl": 3 },
+                            { "item": "Lemon juice", "amount_cl": 2 },
+                            { "item": "Apple juice", "amount_cl": 6 },
+                            { "item": "Cinnamon foam", "amount_cl": "top up" }
+                        ],
+                        "method": "Shake all ingredients except the foam with ice. Serve and top with cinnamon foam."
+                    },
+                    {
+                        "name": "Bubs Raspberry Licorice",
+                        "description": "A sweet and sour drink inspired by the Bubs Raspberry-Licorice skull candy",
+                        "image": "a3e50007-3028-4c7c-815a-20613a7ed5ff.png",
+                        "ingredients": [
+                            { "item": "Vodka", "amount_cl": 5 },
+                            { "item": "Lemon juice", "amount_cl": 3 },
+                            { "item": "Raspberry syrup", "amount_cl": 3 },
+                            { "item": "Licorice foam", "amount_cl": "top" }
+                        ],
+                        "method": "Shake vodka, lemon juice and raspberry syrup with ice until cold. Strain into a coupe glass, top with licorice foam."
+                    },
+                    {
+                        "name": "Spiced Apple Rum",
+                        "description": "A warm and spiced drink with dark rum and apple juice - perfect for autumn and winter",
+                        "is_active": false,
+                        "ingredients": [
+                            { "item": "Dark rum", "amount_cl": 5 },
+                            { "item": "Apple juice", "amount_cl": 6 },
+                            { "item": "Cinnamon syrup", "amount_cl": 2 },
+                            { "item": "Lime juice", "amount_cl": 1 }
+                        ],
+                        "method": "Shake all ingredients with ice and strain into a glass with ice."
+                    }
+                ]
+            },
+            {
+                "name": "Non-Alcoholic",
+                "drinks": [
+                    {
+                        "name": "Virgin Mule",
+                        "description": "Non-alcoholic Moscow Mule - spicy ginger beer with lime, just as refreshing without vodka",
+                        "image": "1cebca51-0c9c-475d-a741-c7f96f1e29e9.png",
+                        "ingredients": [
+                            { "item": "Lime juice", "amount_cl": 2 },
+                            { "item": "Simple syrup", "amount_cl": "1-2 cl" },
+                            { "item": "Ginger beer", "amount_cl": "top up" }
+                        ],
+                        "method": "Build in glass with plenty of ice and top with ginger beer."
+                    },
+                    {
+                        "name": "Virgin Citrus Spritz",
+                        "description": "A simple and refreshing citrus cocktail with soda - light and fresh",
+                        "image": "3758edb5-b55c-4012-a6df-40525d62e2e8.png",
+                        "ingredients": [
+                            { "item": "Lemon juice", "amount_cl": 3 },
+                            { "item": "Simple syrup", "amount_cl": 2 },
+                            { "item": "Soda", "amount_cl": "top up" }
+                        ],
+                        "method": "Build in glass with ice and top with soda."
+                    },
+                    {
+                        "name": "Virgin Apple Pie",
+                        "description": "Non-alcoholic version of Apple Pie - all the lovely flavors of cinnamon and apple without alcohol",
+                        "image": "3ea0b836-7576-47f0-8dd3-21cb85d42392.png",
+                        "ingredients": [
+                            { "item": "Apple juice", "amount_cl": 6 },
+                            { "item": "Lemon juice", "amount_cl": 2 },
+                            { "item": "Cinnamon syrup", "amount_cl": 2 },
+                            { "item": "Soda or foam", "amount_cl": "top up" }
+                        ],
+                        "method": "Build in glass with ice and top up."
+                    },
+                    {
+                        "name": "Virgin French 75",
+                        "description": "A non-alcoholic version of the classic French 75 - fresh citrus flavor with elegant sparkling bubbles",
+                        "image": "4125f1f3-d4ec-4524-aa95-7272d032ad10.png",
+                        "ingredients": [
+                            { "item": "Lemon juice", "amount_cl": 2 },
+                            { "item": "Simple syrup", "amount_cl": 2 },
+                            { "item": "Non-alcoholic sparkling wine or soda", "amount_cl": "top up" }
+                        ],
+                        "method": "Build in glass and top with sparkling wine or soda."
+                    },
+                    {
+                        "name": "Virgin Espresso Tonic",
+                        "description": "Non-alcoholic version of the popular coffee drink - exciting combination of espresso and tonic",
+                        "image": "45ec7bac-7cd6-4d11-9b13-3b756233d7f5.png",
+                        "ingredients": [
+                            { "item": "Espresso", "amount_cl": "double" },
+                            { "item": "Tonic", "amount_cl": "top up" }
+                        ],
+                        "method": "Pour espresso over ice and top with tonic."
+                    },
+                    {
+                        "name": "Virgin Apple Mule",
+                        "description": "A spicy and refreshing non-alcoholic drink with apple juice and ginger beer - thirst-quenching without alcohol",
+                        "is_active": false,
+                        "ingredients": [
+                            { "item": "Apple juice", "amount_cl": 4 },
+                            { "item": "Lime juice", "amount_cl": 2 },
+                            { "item": "Ginger beer", "amount_cl": "top up" }
+                        ],
+                        "method": "Build in a glass with plenty of ice and top with ginger beer."
+                    }
+                ]
+            }
+        ]
+    }
+}

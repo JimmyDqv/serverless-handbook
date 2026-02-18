@@ -1,0 +1,114 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: AI Bartender Image Prompt Generation
+
+Parameters:
+  Application:
+    Type: String
+    Default: ai-bartender
+
+  EventBusStackName:
+    Type: String
+    Description: Name of the EventBridge event bus stack
+    Default: ai-bartender-eventbus
+
+Globals:
+  Function:
+    Timeout: 60
+    Runtime: python3.13
+    Architectures:
+      - arm64
+
+Resources:
+  ImagePromptsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${Application}-image-prompts-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldPrompts
+            Status: Enabled
+            ExpirationInDays: 90
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: Purpose
+          Value: AI-generated image prompts for cocktails
+
+  GenerateImagePromptFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/generateImagePrompt/
+      Handler: handler.handler
+      Description: Generate image prompts for new cocktails using Amazon Bedrock
+      MemorySize: 256
+      Environment:
+        Variables:
+          IMAGE_PROMPTS_BUCKET: !Ref ImagePromptsBucket
+          POWERTOOLS_SERVICE_NAME: generate-image-prompt
+          POWERTOOLS_LOG_LEVEL: INFO
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - S3CrudPolicy:
+            BucketName: !Ref ImagePromptsBucket
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/global.amazon.nova-2-lite-v1:0'
+                - 'arn:aws:bedrock:*::foundation-model/amazon.nova-2-lite-v1:0'
+
+  DrinkCreatedRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${Application}-drink-created-image-prompt-rule'
+      Description: Trigger image prompt generation when new drink is created
+      EventBusName:
+        Fn::ImportValue: !Sub '${EventBusStackName}:event-bus-name'
+      EventPattern:
+        source:
+          - ai-bartender.api
+        detail-type:
+          - DrinkCreated
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt GenerateImagePromptFunction.Arn
+          Id: GenerateImagePromptTarget
+
+  GenerateImagePromptPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref GenerateImagePromptFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt DrinkCreatedRule.Arn
+
+Outputs:
+  ImagePromptsBucketName:
+    Description: Name of the S3 bucket for image prompts
+    Value: !Ref ImagePromptsBucket
+    Export:
+      Name: !Sub '${AWS::StackName}:image-prompts-bucket-name'
+
+  ImagePromptsBucketArn:
+    Description: ARN of the S3 bucket for image prompts
+    Value: !GetAtt ImagePromptsBucket.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}:image-prompts-bucket-arn'
+
+  GenerateImagePromptFunctionArn:
+    Description: ARN of the GenerateImagePrompt Lambda function
+    Value: !GetAtt GenerateImagePromptFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}:generate-image-prompt-function-arn'

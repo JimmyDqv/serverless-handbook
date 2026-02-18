@@ -1,0 +1,227 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: AI Bartender Frontend and Image Hosting Infrastructure
+
+Parameters:
+  Application:
+    Type: String
+    Description: Name of owning application
+    Default: ai-bartender
+  DomainName:
+    Type: String
+    Description: Custom domain name for the application
+  HostedZoneId:
+    Type: String
+    Description: Route53 Hosted Zone ID
+  CertificateArn:
+    Type: String
+    Description: ARN of the ACM certificate (from us-east-1 SSL stack)
+
+Resources:
+  # S3 Bucket for frontend static files
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${Application}-frontend-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # S3 Bucket for drink images
+  ImagesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${Application}-images-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - "*"
+            AllowedMethods:
+              - GET
+              - PUT
+            AllowedOrigins:
+              - "*"
+            MaxAge: 3600
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
+
+  # CloudFront Origin Access Control for S3
+  FrontendOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub ${Application}-frontend-oac
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  ImagesOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub ${Application}-images-oac
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # CloudFront Distribution for frontend and images only (API moved to custom domain)
+  MainCDN:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !Sub ${Application} Main CDN - Frontend and Images
+        Aliases:
+          - !Ref DomainName
+        ViewerCertificate:
+          AcmCertificateArn: !Ref CertificateArn
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+        DefaultCacheBehavior:
+          TargetOriginId: FrontendOrigin
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # Managed-CachingDisabled (for SPA)
+          OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf  # Managed-CORS-S3Origin
+          ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03  # Managed-SecurityHeadersPolicy
+        CacheBehaviors:
+          # Cache behavior for images - long cache
+          - PathPattern: "/images/*"
+            TargetOriginId: ImagesOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # Managed-CachingOptimized
+            OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf  # Managed-CORS-S3Origin
+            ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03  # Managed-SecurityHeadersPolicy
+        DefaultRootObject: index.html
+        Enabled: true
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        Origins:
+          # Frontend origin (S3 bucket with React app)
+          - Id: FrontendOrigin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+            OriginAccessControlId: !Ref FrontendOriginAccessControl
+          # Images origin (S3 bucket with drink images)
+          - Id: ImagesOrigin
+            DomainName: !GetAtt ImagesBucket.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+            OriginAccessControlId: !Ref ImagesOriginAccessControl
+            OriginPath: ""
+        PriceClass: PriceClass_100
+        # SPA error handling - return index.html for 403/404
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+
+  # S3 bucket policy for frontend bucket (CloudFront access only)
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Statement:
+          - Sid: AllowCloudFrontServicePrincipal
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub ${FrontendBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${MainCDN}
+
+  # S3 bucket policy for images bucket (CloudFront access only)
+  ImagesBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ImagesBucket
+      PolicyDocument:
+        Statement:
+          - Sid: AllowCloudFrontServicePrincipal
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub ${ImagesBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${MainCDN}
+
+  # Route53 DNS record for custom domain
+  DNSRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt MainCDN.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2  # CloudFront hosted zone ID (global)
+
+Outputs:
+  FrontendBucketName:
+    Description: The name of the S3 bucket for frontend files
+    Value: !Ref FrontendBucket
+    Export:
+      Name: !Sub ${AWS::StackName}:frontend-bucket-name
+
+  ImagesBucketName:
+    Description: The name of the S3 bucket for images
+    Value: !Ref ImagesBucket
+    Export:
+      Name: !Sub ${AWS::StackName}:images-bucket-name
+
+  ImagesBucketArn:
+    Description: The ARN of the S3 bucket for images
+    Value: !GetAtt ImagesBucket.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:images-bucket-arn
+
+  CDNDomainName:
+    Description: The CloudFront distribution domain name
+    Value: !GetAtt MainCDN.DomainName
+    Export:
+      Name: !Sub ${AWS::StackName}:cdn-domain-name
+
+  CDNDistributionId:
+    Description: The CloudFront distribution ID
+    Value: !Ref MainCDN
+    Export:
+      Name: !Sub ${AWS::StackName}:cdn-distribution-id
+
+  CustomDomainName:
+    Description: The custom domain name
+    Value: !Ref DomainName
+    Export:
+      Name: !Sub ${AWS::StackName}:custom-domain-name
+
+  CloudFrontDomain:
+    Description: The CloudFront domain for images
+    Value: !Ref DomainName
+    Export:
+      Name: !Sub ${AWS::StackName}:cloudfront-domain

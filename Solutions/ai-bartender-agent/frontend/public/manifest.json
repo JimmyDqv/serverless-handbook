@@ -1,0 +1,63 @@
+{
+  "short_name": "Bartender",
+  "name": "AI Bartender - Browse and Order Drinks",
+  "icons": [
+    {
+      "src": "android-chrome-192x192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "android-chrome-512x512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#00D9C0",
+  "background_color": "#ffffff",
+  "categories": [
+    "food",
+    "lifestyle",
+    "entertainment"
+  ],
+  "description": "Browse and order drinks with ease using the AI Bartender app",
+  "lang": "en",
+  "scope": "/",
+  "prefer_related_applications": false,
+  "display_override": [
+    "window-controls-overlay",
+    "standalone",
+    "minimal-ui"
+  ],
+  "shortcuts": [
+    {
+      "name": "Browse Drinks",
+      "short_name": "Browse",
+      "description": "Browse available drinks",
+      "url": "/",
+      "icons": [
+        {
+          "src": "logo192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Admin Dashboard",
+      "short_name": "Admin",
+      "description": "Access admin dashboard",
+      "url": "/admin",
+      "icons": [
+        {
+          "src": "logo192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ]
+}

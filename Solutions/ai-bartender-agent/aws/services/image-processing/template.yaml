@@ -1,0 +1,86 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: AI Bartender Image Processing
+
+Parameters:
+  Application:
+    Type: String
+    Default: ai-bartender
+
+  HostingStackName:
+    Type: String
+    Description: Name of the hosting stack (for S3 bucket and CloudFront imports)
+    Default: ai-bartender-hosting
+
+  DatastoreStackName:
+    Type: String
+    Description: Name of the datastore stack (for DSQL imports)
+    Default: ai-bartender-datastore
+
+Resources:
+  ProcessImageEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${Application}-process-image-rule'
+      Description: Trigger image processing when image uploaded to original/ prefix
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - Object Created
+        detail:
+          bucket:
+            name:
+              - Fn::ImportValue: !Sub '${HostingStackName}:images-bucket-name'
+          object:
+            key:
+              - prefix: original/
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt ProcessImageFunction.Arn
+          Id: ProcessImageFunctionTarget
+
+  ProcessImageFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ProcessImageFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ProcessImageEventRule.Arn
+
+  ProcessImageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/processImage/
+      Handler: handler.handler
+      Description: Process uploaded images and generate optimized versions
+      Architectures:
+        - arm64
+      Runtime: python3.13
+      Timeout: 30
+      MemorySize: 1024
+      Environment:
+        Variables:
+          DSQL_CLUSTER_ENDPOINT:
+            Fn::ImportValue: !Sub '${DatastoreStackName}:dsql-cluster-endpoint'
+          DATABASE_WRITER_ROLE:
+            Fn::ImportValue: !Sub '${DatastoreStackName}:dsql-data-writer-role-arn'
+          DATABASE_USER:
+            Fn::ImportValue: !Sub '${DatastoreStackName}:dsql-db-writer-user'
+          CLOUDFRONT_DOMAIN:
+            Fn::ImportValue: !Sub '${HostingStackName}:cloudfront-domain'
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - S3CrudPolicy:
+            BucketName:
+              Fn::ImportValue: !Sub '${HostingStackName}:images-bucket-name'
+        - Version: "2012-10-17"
+          Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - dsql:*
+              Effect: Allow
+              Resource: "*"

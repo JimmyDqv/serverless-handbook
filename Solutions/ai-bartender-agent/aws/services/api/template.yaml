@@ -1,0 +1,1656 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'AI Bartender API - Lambda functions and API Gateway with Custom Domain'
+
+Parameters:
+  Application:
+    Type: String
+    Description: Name of owning application
+    Default: ai-bartender
+
+  InfrastructureStackName:
+    Type: String
+    Description: Name of the datastore stack
+    Default: ai-bartender-datastore
+
+  EventsStackName:
+    Type: String
+    Description: Name of the AppSync Events stack
+    Default: ai-bartender-events
+
+  EventBusStackName:
+    Type: String
+    Description: Name of the EventBridge event bus stack
+    Default: ai-bartender-eventbus
+
+  UserPoolId:
+    Type: String
+    Description: Cognito User Pool ID
+    NoEcho: false
+
+  UserPoolClientId:
+    Type: String
+    Description: Cognito User Pool Client ID
+    NoEcho: false
+
+  ApiDomainName:
+    Type: String
+    Description: Custom domain name for API Gateway
+
+  HostedZoneId:
+    Type: String
+    Description: Route53 Hosted Zone ID
+
+  EnableApiCaching:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable API Gateway caching for public endpoints
+
+  ApiCacheSizeGb:
+    Type: String
+    Default: "0.5"
+    AllowedValues:
+      - "0.5"
+      - "1.6"
+      - "6.1"
+      - "13.5"
+      - "28.4"
+      - "58.2"
+      - "118"
+      - "237"
+    Description: API Gateway cache size in GB
+
+Conditions:
+  CachingEnabled: !Equals [!Ref EnableApiCaching, "true"]
+
+Globals:
+  Function:
+    Timeout: 30
+    Runtime: python3.13
+    Architectures:
+      - arm64
+    Tracing: Active
+    Layers:
+      - !Ref SharedLayer
+  Api:
+    TracingEnabled: true
+
+Resources:
+
+  SharedLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub '${Application}-shared-layer'
+      Description: Shared utilities for Lambda functions (cache_utils, event_publisher)
+      ContentUri: src/shared/python/
+      CompatibleRuntimes:
+        - python3.13
+      CompatibleArchitectures:
+        - arm64
+
+  ApiSSLCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref ApiDomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref ApiDomainName
+          HostedZoneId: !Ref HostedZoneId
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+
+  JWTAuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/authorizer/
+      Handler: handler.handler
+      Description: 'JWT token validator for admin endpoints'
+      Environment:
+        Variables:
+          USER_POOL_ID: !Ref UserPoolId
+          USER_POOL_CLIENT_ID: !Ref UserPoolClientId
+          # Comma-separated list of allowed Cognito client IDs
+          # Set via parameter_overrides in samconfig.yaml for multi-client support
+          ALLOWED_CLIENT_IDS: !Ref UserPoolClientId
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetUser
+                - cognito-idp:ListUsers
+              Resource: !Sub 'arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}'
+
+  UserAuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/userAuthorizer/
+      Handler: handler.lambda_handler
+      Description: 'JWT access token validator for user order endpoints'
+      Environment:
+        Variables:
+          JWT_KEYS_SECRET_NAME: !Ref JWTKeysSecret
+          POWERTOOLS_SERVICE_NAME: user-authorizer
+          POWERTOOLS_LOG_LEVEL: INFO
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref JWTKeysSecret
+
+  RegistrationAuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/registrationAuthorizer/
+      Handler: handler.lambda_handler
+      Description: 'Registration code validator for user registration'
+      Environment:
+        Variables:
+          DSQL_CLUSTER_ENDPOINT:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-cluster-endpoint'
+          DATABASE_READER_ROLE:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-data-reader-role-arn'
+          DATABASE_USER:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-db-reader-user'
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - dsql:*
+              Effect: Allow
+              Resource: "*"
+
+  AiBartenderApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub '${Application}-api'
+      StageName: v1
+      OpenApiVersion: '3.0.1'
+      AlwaysDeploy: true
+      EndpointConfiguration: REGIONAL
+      ApiKeySourceType: HEADER
+      CacheClusterEnabled: !If [CachingEnabled, true, false]
+      CacheClusterSize: !If [CachingEnabled, !Ref ApiCacheSizeGb, !Ref "AWS::NoValue"]
+      MethodSettings:
+        # Default: no caching for all endpoints
+        - ResourcePath: "/*"
+          HttpMethod: "*"
+          CachingEnabled: false
+        # Cache GET /sections (1 hour max TTL) - invalidated on admin updates
+        - ResourcePath: "/sections"
+          HttpMethod: "GET"
+          CachingEnabled: !If [CachingEnabled, true, false]
+          CacheTtlInSeconds: 3600
+          CacheDataEncrypted: true
+        # Cache GET /drinks (1 hour max TTL) - invalidated on admin updates
+        - ResourcePath: "/drinks"
+          HttpMethod: "GET"
+          CachingEnabled: !If [CachingEnabled, true, false]
+          CacheTtlInSeconds: 3600
+          CacheDataEncrypted: true
+        # Cache GET /drinks/{id} (1 hour max TTL) - cache key includes {id} parameter
+        # configured via RequestParameters on GetDrinkByIdFunction
+        - ResourcePath: "/drinks/{id}"
+          HttpMethod: "GET"
+          CachingEnabled: !If [CachingEnabled, true, false]
+          CacheTtlInSeconds: 3600
+          CacheDataEncrypted: true
+      Cors:
+        AllowMethods: "'GET,PUT,POST,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+      Auth:
+        AddDefaultAuthorizerToCorsPreflight: false
+        DefaultAuthorizer: JWTAuthorizer
+        ApiKeyRequired: true
+        Authorizers:
+          JWTAuthorizer:
+            FunctionArn: !GetAtt JWTAuthorizerFunction.Arn
+            FunctionInvokeRole: !GetAtt AuthorizerInvokeRole.Arn
+            FunctionPayloadType: REQUEST
+            Identity:
+              Headers:
+                - Authorization
+              ReauthorizeEvery: 0
+          RegistrationAuthorizer:
+            FunctionArn: !GetAtt RegistrationAuthorizerFunction.Arn
+            FunctionInvokeRole: !GetAtt AuthorizerInvokeRole.Arn
+            FunctionPayloadType: REQUEST
+            Identity:
+              Headers:
+                - X-Registration-Code
+              ReauthorizeEvery: 0
+          UserAuthorizer:
+            FunctionArn: !GetAtt UserAuthorizerFunction.Arn
+            FunctionInvokeRole: !GetAtt AuthorizerInvokeRole.Arn
+            FunctionPayloadType: REQUEST
+            Identity:
+              Headers:
+                - Authorization
+              ReauthorizeEvery: 0
+      GatewayResponses:
+        DEFAULT_4XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'*'"
+              Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Registration-Code'"
+              Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        DEFAULT_5XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'*'"
+              Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Registration-Code'"
+              Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        UNAUTHORIZED:
+          StatusCode: 401
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'*'"
+              Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Registration-Code'"
+          ResponseTemplates:
+            application/json: '{"error": {"code": "UNAUTHORIZED", "message": "Authentication required"}}'
+        ACCESS_DENIED:
+          StatusCode: 403
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'*'"
+              Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Registration-Code'"
+          ResponseTemplates:
+            application/json: '{"error": {"code": "ACCESS_DENIED", "message": "Insufficient permissions"}}'
+
+  ApiDomainNameResource:
+    Type: AWS::ApiGateway::DomainName
+    Properties:
+      DomainName: !Ref ApiDomainName
+      RegionalCertificateArn: !Ref ApiSSLCertificate
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      SecurityPolicy: TLS_1_2
+
+  ApiBasePathMapping:
+    Type: AWS::ApiGateway::BasePathMapping
+    DependsOn: AiBartenderApiv1Stage
+    Properties:
+      DomainName: !Ref ApiDomainNameResource
+      RestApiId: !Ref AiBartenderApi
+      Stage: v1
+
+  ApiDnsRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref ApiDomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt ApiDomainNameResource.RegionalDomainName
+        HostedZoneId: !GetAtt ApiDomainNameResource.RegionalHostedZoneId
+
+  AuthorizerInvokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${Application}-authorizer-invoke-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - !GetAtt JWTAuthorizerFunction.Arn
+                  - !GetAtt RegistrationAuthorizerFunction.Arn
+                  - !GetAtt UserAuthorizerFunction.Arn
+
+  JWTKeysSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${Application}/jwt-keys'
+      Description: 'RSA key pair for JWT token signing and verification'
+      GenerateSecretString:
+        SecretStringTemplate: '{"algorithm": "RS256"}'
+        GenerateStringKey: "placeholder"
+        ExcludeCharacters: '"@/\'
+
+  PublicApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    DependsOn: AiBartenderApiv1Stage
+    Properties:
+      Name: !Sub '${Application}-public-api-key'
+      Description: 'API key for public endpoints'
+      Enabled: true
+      StageKeys:
+        - RestApiId: !Ref AiBartenderApi
+          StageName: v1
+
+  AdminApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    DependsOn: AiBartenderApiv1Stage
+    Properties:
+      Name: !Sub '${Application}-admin-api-key'
+      Description: 'API key for admin endpoints'
+      Enabled: true
+      StageKeys:
+        - RestApiId: !Ref AiBartenderApi
+          StageName: v1
+
+  PublicUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    DependsOn: AiBartenderApiv1Stage
+    Properties:
+      UsagePlanName: !Sub '${Application}-public-usage-plan'
+      Description: 'Usage plan for public endpoints'
+      ApiStages:
+        - ApiId: !Ref AiBartenderApi
+          Stage: v1
+          Throttle:
+            "/sections/GET":
+              RateLimit: 100
+              BurstLimit: 200
+            "/drinks/GET":
+              RateLimit: 100
+              BurstLimit: 200
+            "/drinks/{id}/GET":
+              RateLimit: 100
+              BurstLimit: 200
+            "/orders/POST":
+              RateLimit: 50
+              BurstLimit: 100
+            "/orders/{id}/GET":
+              RateLimit: 100
+              BurstLimit: 200
+            "/orders/GET":
+              RateLimit: 100
+              BurstLimit: 200
+            "/register/POST":
+              RateLimit: 10
+              BurstLimit: 20
+            "/auth/refresh/POST":
+              RateLimit: 30
+              BurstLimit: 60
+      Throttle:
+        RateLimit: 100
+        BurstLimit: 200
+
+  AdminUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    DependsOn: AiBartenderApiv1Stage
+    Properties:
+      UsagePlanName: !Sub '${Application}-admin-usage-plan'
+      Description: 'Usage plan for admin endpoints'
+      ApiStages:
+        - ApiId: !Ref AiBartenderApi
+          Stage: v1
+          Throttle:
+            "/admin/drinks/GET":
+              RateLimit: 100
+              BurstLimit: 200
+            "/admin/drinks/POST":
+              RateLimit: 50
+              BurstLimit: 100
+            "/admin/drinks/{id}/PUT":
+              RateLimit: 50
+              BurstLimit: 100
+            "/admin/drinks/{id}/DELETE":
+              RateLimit: 20
+              BurstLimit: 50
+            "/admin/orders/GET":
+              RateLimit: 100
+              BurstLimit: 200
+            "/admin/orders/{id}/PUT":
+              RateLimit: 50
+              BurstLimit: 100
+            "/admin/sections/GET":
+              RateLimit: 100
+              BurstLimit: 200
+            "/admin/sections/POST":
+              RateLimit: 50
+              BurstLimit: 100
+            "/admin/sections/{id}/PUT":
+              RateLimit: 50
+              BurstLimit: 100
+            "/admin/sections/{id}/DELETE":
+              RateLimit: 20
+              BurstLimit: 50
+            "/admin/registration-codes/GET":
+              RateLimit: 100
+              BurstLimit: 200
+            "/admin/registration-codes/POST":
+              RateLimit: 30
+              BurstLimit: 60
+            "/admin/registration-codes/{code}/DELETE":
+              RateLimit: 20
+              BurstLimit: 50
+      Throttle:
+        RateLimit: 100
+        BurstLimit: 200
+
+  PublicUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref PublicApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref PublicUsagePlan
+
+  AdminUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref AdminApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref AdminUsagePlan
+
+  McpToolsApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    DependsOn: AiBartenderApiv1Stage
+    Properties:
+      Name: !Sub '${Application}-mcp-tools-api-key'
+      Description: 'API key for AgentCore Gateway MCP tools to access drinks API'
+      Enabled: true
+      StageKeys:
+        - RestApiId: !Ref AiBartenderApi
+          StageName: v1
+
+  McpToolsUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    DependsOn: AiBartenderApiv1Stage
+    Properties:
+      UsagePlanName: !Sub '${Application}-mcp-tools-usage-plan'
+      Description: 'Usage plan for MCP tools - read-only access to drinks'
+      ApiStages:
+        - ApiId: !Ref AiBartenderApi
+          Stage: v1
+          Throttle:
+            # MCP tools only need read access to drinks
+            "/drinks/GET":
+              RateLimit: 50
+              BurstLimit: 100
+            "/sections/GET":
+              RateLimit: 20
+              BurstLimit: 50
+      Throttle:
+        RateLimit: 50
+        BurstLimit: 100
+
+  McpToolsUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref McpToolsApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref McpToolsUsagePlan
+
+  # After deployment, update this secret with the actual API key value from the API Gateway console
+  McpToolsApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${Application}/mcp-tools-api-key'
+      Description: 'API key for AgentCore Gateway MCP tools to authenticate to drinks API'
+      SecretString: '{"api-key": "REPLACE_ME_WITH_ACTUAL_API_KEY"}'
+
+  CorsOptionsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/corsOptions/
+      Handler: handler.handler
+      Description: 'CORS preflight OPTIONS handler'
+      Environment:
+        Variables:
+          ALLOWED_ORIGIN: '*'
+      Policies:
+        - AWSLambdaBasicExecutionRole
+      Events:
+        OptionsSections:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /sections
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: false
+        OptionsDrinks:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /drinks
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: false
+        OptionsDrinkById:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /drinks/{id}
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: false
+        OptionsOrders:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /orders
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: false
+        OptionsOrderById:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /orders/{id}
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: false
+        OptionsAdminDrinks:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /admin/drinks
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: false
+        OptionsAdminDrinkById:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /admin/drinks/{id}
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: false
+        OptionsAdminOrders:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /admin/orders
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: false
+        OptionsAdminOrderById:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /admin/orders/{id}
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: false
+        OptionsAdminSections:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /admin/sections
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: false
+        OptionsAdminSectionById:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /admin/sections/{id}
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: false
+        OptionsAdminImagesUploadUrl:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /admin/images/upload-url
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: false
+        OptionsAdminRegistrationCodes:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /admin/registration-codes
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: false
+        OptionsAdminRegistrationCodeById:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /admin/registration-codes/{code}
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: false
+        OptionsRegister:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /register
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: false
+        OptionsAuthRefresh:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /auth/refresh
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: false
+
+  # --- Public API ---
+
+  GetSectionsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/getSections/
+      Handler: handler.handler
+      Description: 'Get all drink sections'
+      Environment:
+        Variables:
+          DSQL_CLUSTER_ENDPOINT:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-cluster-endpoint'
+          DATABASE_READER_ROLE:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-data-reader-role-arn'
+          DATABASE_USER:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-db-reader-user'
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - dsql:*
+              Effect: Allow
+              Resource: "*"
+      Events:
+        GetSections:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /sections
+            Method: GET
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: true
+
+  GetDrinksFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/getDrinks/
+      Handler: handler.handler
+      Description: 'Get all drinks with optional filtering'
+      Environment:
+        Variables:
+          DSQL_CLUSTER_ENDPOINT:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-cluster-endpoint'
+          DATABASE_READER_ROLE:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-data-reader-role-arn'
+          DATABASE_USER:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-db-reader-user'
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - dsql:*
+              Effect: Allow
+              Resource: "*"
+      Events:
+        GetDrinks:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /drinks
+            Method: GET
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: true
+
+  GetDrinkByIdFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/getDrinkById/
+      Handler: handler.handler
+      Description: 'Get a specific drink by ID'
+      Environment:
+        Variables:
+          DSQL_CLUSTER_ENDPOINT:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-cluster-endpoint'
+          DATABASE_READER_ROLE:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-data-reader-role-arn'
+          DATABASE_USER:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-db-reader-user'
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - dsql:*
+              Effect: Allow
+              Resource: "*"
+      Events:
+        GetDrinkById:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /drinks/{id}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: true
+            RequestParameters:
+              - method.request.path.id:
+                  Required: true
+                  Caching: true
+
+  CreateOrderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/createOrder/
+      Handler: handler.handler
+      Description: 'Create a new order'
+      Environment:
+        Variables:
+          DSQL_CLUSTER_ENDPOINT:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-cluster-endpoint'
+          DATABASE_WRITER_ROLE:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-data-writer-role-arn'
+          DATABASE_USER:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-db-writer-user'
+          APPSYNC_EVENTS_HTTP_ENDPOINT:
+            Fn::ImportValue: !Sub '${Application}-events:api-dns'
+          APPSYNC_EVENTS_API_KEY:
+            Fn::ImportValue: !Sub '${Application}-events:api-key'
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - dsql:*
+              Effect: Allow
+              Resource: "*"
+      Events:
+        CreateOrder:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /orders
+            Method: POST
+            Auth:
+              Authorizer: UserAuthorizer
+              ApiKeyRequired: true
+
+  GetOrderStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/getOrderStatus/
+      Handler: handler.handler
+      Description: 'Get order status for authenticated user'
+      Environment:
+        Variables:
+          DSQL_CLUSTER_ENDPOINT:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-cluster-endpoint'
+          DATABASE_READER_ROLE:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-data-reader-role-arn'
+          DATABASE_USER:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-db-reader-user'
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - dsql:*
+              Effect: Allow
+              Resource: "*"
+      Events:
+        GetOrderStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /orders/{id}
+            Method: GET
+            Auth:
+              Authorizer: UserAuthorizer
+              ApiKeyRequired: true
+
+  GetMyOrdersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/getMyOrders/
+      Handler: handler.handler
+      Description: 'Get orders for authenticated user'
+      Environment:
+        Variables:
+          DSQL_CLUSTER_ENDPOINT:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-cluster-endpoint'
+          DATABASE_READER_ROLE:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-data-reader-role-arn'
+          DATABASE_USER:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-db-reader-user'
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - dsql:*
+              Effect: Allow
+              Resource: "*"
+      Events:
+        GetMyOrders:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /orders
+            Method: GET
+            Auth:
+              Authorizer: UserAuthorizer
+              ApiKeyRequired: true
+
+  RegisterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/register/
+      Handler: handler.lambda_handler
+      Description: 'User registration endpoint'
+      Environment:
+        Variables:
+          DSQL_CLUSTER_ENDPOINT:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-cluster-endpoint'
+          DATABASE_WRITER_ROLE:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-data-writer-role-arn'
+          DATABASE_USER:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-db-writer-user'
+          JWT_KEYS_SECRET_NAME: !Ref JWTKeysSecret
+          POWERTOOLS_SERVICE_NAME: register
+          POWERTOOLS_LOG_LEVEL: INFO
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - dsql:*
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - secretsmanager:GetSecretValue
+              Effect: Allow
+              Resource: !Ref JWTKeysSecret
+      Events:
+        Register:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /register
+            Method: POST
+            Auth:
+              Authorizer: RegistrationAuthorizer
+              ApiKeyRequired: true
+
+  RefreshTokenFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/refreshToken/
+      Handler: handler.lambda_handler
+      Description: 'Refresh access token using refresh token'
+      Environment:
+        Variables:
+          DSQL_CLUSTER_ENDPOINT:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-cluster-endpoint'
+          DATABASE_WRITER_ROLE:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-data-writer-role-arn'
+          DATABASE_USER:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-db-writer-user'
+          JWT_KEYS_SECRET_NAME: !Ref JWTKeysSecret
+          POWERTOOLS_SERVICE_NAME: refresh-token
+          POWERTOOLS_LOG_LEVEL: INFO
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - dsql:*
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - secretsmanager:GetSecretValue
+              Effect: Allow
+              Resource: !Ref JWTKeysSecret
+      Events:
+        RefreshToken:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /auth/refresh
+            Method: POST
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: true
+
+  # --- Admin API ---
+
+  GetAllOrdersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/getAllOrders/
+      Handler: handler.handler
+      Description: 'Get all orders for admin queue'
+      Environment:
+        Variables:
+          DSQL_CLUSTER_ENDPOINT:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-cluster-endpoint'
+          DATABASE_READER_ROLE:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-data-reader-role-arn'
+          DATABASE_USER:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-db-reader-user'
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - dsql:*
+              Effect: Allow
+              Resource: "*"
+      Events:
+        GetAllOrders:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /admin/orders
+            Method: GET
+            Auth:
+              Authorizer: JWTAuthorizer
+              ApiKeyRequired: true
+
+  UpdateOrderStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/updateOrderStatus/
+      Handler: handler.handler
+      Description: 'Admin endpoint to update order status'
+      Environment:
+        Variables:
+          DSQL_CLUSTER_ENDPOINT:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-cluster-endpoint'
+          DATABASE_WRITER_ROLE:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-data-writer-role-arn'
+          DATABASE_USER:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-db-writer-user'
+          APPSYNC_EVENTS_HTTP_ENDPOINT:
+            Fn::ImportValue: !Sub '${Application}-events:api-dns'
+          APPSYNC_EVENTS_API_KEY:
+            Fn::ImportValue: !Sub '${Application}-events:api-key'
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - dsql:*
+              Effect: Allow
+              Resource: "*"
+      Events:
+        UpdateOrderStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /admin/orders/{id}
+            Method: PUT
+            Auth:
+              Authorizer: JWTAuthorizer
+              ApiKeyRequired: true
+
+  CreateDrinkFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/createDrink/
+      Handler: handler.handler
+      Description: 'Admin endpoint to create a new drink'
+      Environment:
+        Variables:
+          DSQL_CLUSTER_ENDPOINT:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-cluster-endpoint'
+          DATABASE_WRITER_ROLE:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-data-writer-role-arn'
+          DATABASE_USER:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-db-writer-user'
+          API_NAME: !Sub '${Application}-api'
+          API_STAGE_NAME: v1
+          DRINK_EVENT_BUS_NAME:
+            Fn::ImportValue: !Sub '${EventBusStackName}:event-bus-name'
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - dsql:*
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - apigateway:GET
+              Effect: Allow
+              Resource: !Sub "arn:aws:apigateway:${AWS::Region}::/restapis"
+            - Action:
+                - apigateway:DELETE
+              Effect: Allow
+              Resource: !Sub "arn:aws:apigateway:${AWS::Region}::/restapis/*/stages/v1/cache/data"
+            - Action:
+                - events:PutEvents
+              Effect: Allow
+              Resource:
+                Fn::ImportValue: !Sub '${EventBusStackName}:event-bus-arn'
+      Events:
+        CreateDrink:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /admin/drinks
+            Method: POST
+            Auth:
+              Authorizer: JWTAuthorizer
+              ApiKeyRequired: true
+
+  UpdateDrinkFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/updateDrink/
+      Handler: handler.handler
+      Description: 'Admin endpoint to update an existing drink'
+      Environment:
+        Variables:
+          DSQL_CLUSTER_ENDPOINT:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-cluster-endpoint'
+          DATABASE_WRITER_ROLE:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-data-writer-role-arn'
+          DATABASE_USER:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-db-writer-user'
+          IMAGES_BUCKET:
+            Fn::ImportValue: !Sub '${Application}-hosting:images-bucket-name'
+          API_NAME: !Sub '${Application}-api'
+          API_STAGE_NAME: v1
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - dsql:*
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - s3:DeleteObject
+                - s3:ListBucket
+              Effect: Allow
+              Resource:
+                - Fn::Sub:
+                    - 'arn:aws:s3:::${BucketName}'
+                    - BucketName:
+                        Fn::ImportValue: !Sub '${Application}-hosting:images-bucket-name'
+                - Fn::Sub:
+                    - 'arn:aws:s3:::${BucketName}/*'
+                    - BucketName:
+                        Fn::ImportValue: !Sub '${Application}-hosting:images-bucket-name'
+            - Action:
+                - apigateway:GET
+              Effect: Allow
+              Resource: !Sub "arn:aws:apigateway:${AWS::Region}::/restapis"
+            - Action:
+                - apigateway:DELETE
+              Effect: Allow
+              Resource: !Sub "arn:aws:apigateway:${AWS::Region}::/restapis/*/stages/v1/cache/data"
+      Events:
+        UpdateDrink:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /admin/drinks/{id}
+            Method: PUT
+            Auth:
+              Authorizer: JWTAuthorizer
+              ApiKeyRequired: true
+
+  DeleteDrinkFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/deleteDrink/
+      Handler: handler.handler
+      Description: 'Admin endpoint to delete a drink and its images'
+      Environment:
+        Variables:
+          DSQL_CLUSTER_ENDPOINT:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-cluster-endpoint'
+          DATABASE_WRITER_ROLE:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-data-writer-role-arn'
+          DATABASE_USER:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-db-writer-user'
+          IMAGES_BUCKET:
+            Fn::ImportValue: !Sub '${Application}-hosting:images-bucket-name'
+          API_NAME: !Sub '${Application}-api'
+          API_STAGE_NAME: v1
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - dsql:*
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - s3:DeleteObject
+                - s3:ListBucket
+              Effect: Allow
+              Resource:
+                - Fn::Sub:
+                    - 'arn:aws:s3:::${BucketName}'
+                    - BucketName:
+                        Fn::ImportValue: !Sub '${Application}-hosting:images-bucket-name'
+                - Fn::Sub:
+                    - 'arn:aws:s3:::${BucketName}/*'
+                    - BucketName:
+                        Fn::ImportValue: !Sub '${Application}-hosting:images-bucket-name'
+            - Action:
+                - apigateway:GET
+              Effect: Allow
+              Resource: !Sub "arn:aws:apigateway:${AWS::Region}::/restapis"
+            - Action:
+                - apigateway:DELETE
+              Effect: Allow
+              Resource: !Sub "arn:aws:apigateway:${AWS::Region}::/restapis/*/stages/v1/cache/data"
+      Events:
+        DeleteDrink:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /admin/drinks/{id}
+            Method: DELETE
+            Auth:
+              Authorizer: JWTAuthorizer
+              ApiKeyRequired: true
+
+  GetAllDrinksAdminFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/getAllDrinksAdmin/
+      Handler: handler.handler
+      Description: 'Admin endpoint to get all drinks with full details'
+      Environment:
+        Variables:
+          DSQL_CLUSTER_ENDPOINT:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-cluster-endpoint'
+          DATABASE_READER_ROLE:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-data-reader-role-arn'
+          DATABASE_USER:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-db-reader-user'
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - dsql:*
+              Effect: Allow
+              Resource: "*"
+      Events:
+        GetAllDrinksAdmin:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /admin/drinks
+            Method: GET
+            Auth:
+              Authorizer: JWTAuthorizer
+              ApiKeyRequired: true
+
+  AdminGetSectionsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/getSections/
+      Handler: handler.handler
+      Description: 'Admin endpoint to get all sections'
+      Environment:
+        Variables:
+          DSQL_CLUSTER_ENDPOINT:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-cluster-endpoint'
+          DATABASE_READER_ROLE:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-data-reader-role-arn'
+          DATABASE_USER:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-db-reader-user'
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - dsql:*
+              Effect: Allow
+              Resource: "*"
+      Events:
+        GetAllSectionsAdmin:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /admin/sections
+            Method: GET
+            Auth:
+              Authorizer: JWTAuthorizer
+              ApiKeyRequired: true
+
+  CreateSectionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/createSection/
+      Handler: handler.handler
+      Description: 'Admin endpoint to create a new section'
+      Environment:
+        Variables:
+          DSQL_CLUSTER_ENDPOINT:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-cluster-endpoint'
+          DATABASE_WRITER_ROLE:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-data-writer-role-arn'
+          DATABASE_USER:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-db-writer-user'
+          API_NAME: !Sub '${Application}-api'
+          API_STAGE_NAME: v1
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - dsql:*
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - apigateway:GET
+              Effect: Allow
+              Resource: !Sub "arn:aws:apigateway:${AWS::Region}::/restapis"
+            - Action:
+                - apigateway:DELETE
+              Effect: Allow
+              Resource: !Sub "arn:aws:apigateway:${AWS::Region}::/restapis/*/stages/v1/cache/data"
+      Events:
+        CreateSection:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /admin/sections
+            Method: POST
+            Auth:
+              Authorizer: JWTAuthorizer
+              ApiKeyRequired: true
+
+  UpdateSectionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/updateSection/
+      Handler: handler.handler
+      Description: 'Admin endpoint to update an existing section'
+      Environment:
+        Variables:
+          DSQL_CLUSTER_ENDPOINT:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-cluster-endpoint'
+          DATABASE_WRITER_ROLE:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-data-writer-role-arn'
+          DATABASE_USER:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-db-writer-user'
+          API_NAME: !Sub '${Application}-api'
+          API_STAGE_NAME: v1
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - dsql:*
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - apigateway:GET
+              Effect: Allow
+              Resource: !Sub "arn:aws:apigateway:${AWS::Region}::/restapis"
+            - Action:
+                - apigateway:DELETE
+              Effect: Allow
+              Resource: !Sub "arn:aws:apigateway:${AWS::Region}::/restapis/*/stages/v1/cache/data"
+      Events:
+        UpdateSection:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /admin/sections/{id}
+            Method: PUT
+            Auth:
+              Authorizer: JWTAuthorizer
+              ApiKeyRequired: true
+
+  DeleteSectionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/deleteSection/
+      Handler: handler.handler
+      Description: 'Admin endpoint to delete a section'
+      Environment:
+        Variables:
+          DSQL_CLUSTER_ENDPOINT:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-cluster-endpoint'
+          DATABASE_WRITER_ROLE:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-data-writer-role-arn'
+          DATABASE_USER:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-db-writer-user'
+          API_NAME: !Sub '${Application}-api'
+          API_STAGE_NAME: v1
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - dsql:*
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - apigateway:GET
+              Effect: Allow
+              Resource: !Sub "arn:aws:apigateway:${AWS::Region}::/restapis"
+            - Action:
+                - apigateway:DELETE
+              Effect: Allow
+              Resource: !Sub "arn:aws:apigateway:${AWS::Region}::/restapis/*/stages/v1/cache/data"
+      Events:
+        DeleteSection:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /admin/sections/{id}
+            Method: DELETE
+            Auth:
+              Authorizer: JWTAuthorizer
+              ApiKeyRequired: true
+
+  CreateRegistrationCodeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/createRegistrationCode/
+      Handler: handler.handler
+      Description: 'Admin endpoint to create registration codes for guest users'
+      Environment:
+        Variables:
+          DSQL_CLUSTER_ENDPOINT:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-cluster-endpoint'
+          DATABASE_WRITER_ROLE:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-data-writer-role-arn'
+          DATABASE_USER:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-db-writer-user'
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - dsql:*
+              Effect: Allow
+              Resource: "*"
+      Events:
+        CreateRegistrationCode:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /admin/registration-codes
+            Method: POST
+            Auth:
+              Authorizer: JWTAuthorizer
+              ApiKeyRequired: true
+
+  GetRegistrationCodesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/getRegistrationCodes/
+      Handler: handler.handler
+      Description: 'Admin endpoint to list registration codes'
+      Environment:
+        Variables:
+          DSQL_CLUSTER_ENDPOINT:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-cluster-endpoint'
+          DATABASE_READER_ROLE:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-data-reader-role-arn'
+          DATABASE_USER:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-db-reader-user'
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - dsql:*
+              Effect: Allow
+              Resource: "*"
+      Events:
+        GetRegistrationCodes:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /admin/registration-codes
+            Method: GET
+            Auth:
+              Authorizer: JWTAuthorizer
+              ApiKeyRequired: true
+
+  DeleteRegistrationCodeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/deleteRegistrationCode/
+      Handler: handler.handler
+      Description: 'Admin endpoint to delete a registration code'
+      Environment:
+        Variables:
+          DSQL_CLUSTER_ENDPOINT:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-cluster-endpoint'
+          DATABASE_WRITER_ROLE:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-data-writer-role-arn'
+          DATABASE_USER:
+            Fn::ImportValue: !Sub '${InfrastructureStackName}:dsql-db-writer-user'
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Resource: "*"
+            - Action:
+                - dsql:*
+              Effect: Allow
+              Resource: "*"
+      Events:
+        DeleteRegistrationCode:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /admin/registration-codes/{code}
+            Method: DELETE
+            Auth:
+              Authorizer: JWTAuthorizer
+              ApiKeyRequired: true
+
+  GeneratePresignedUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/generatePresignedUrl/
+      Handler: handler.handler
+      Description: 'Generate presigned URL for image upload to S3'
+      Environment:
+        Variables:
+          IMAGES_BUCKET:
+            Fn::ImportValue: !Sub '${Application}-hosting:images-bucket-name'
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource:
+                Fn::Sub:
+                  - '${BucketArn}/*'
+                  - BucketArn:
+                      Fn::ImportValue: !Sub '${Application}-hosting:images-bucket-arn'
+      Events:
+        GenerateUploadUrl:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AiBartenderApi
+            Path: /admin/images/upload-url
+            Method: POST
+            Auth:
+              Authorizer: JWTAuthorizer
+              ApiKeyRequired: true
+
+Outputs:
+  ApiUrl:
+    Description: 'API Gateway endpoint URL (direct)'
+    Value: !Sub 'https://${AiBartenderApi}.execute-api.${AWS::Region}.amazonaws.com/v1'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiUrl'
+
+  ApiCustomDomainUrl:
+    Description: 'API Gateway custom domain URL'
+    Value: !Sub 'https://${ApiDomainName}'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiCustomDomainUrl'
+
+  ApiId:
+    Description: 'API Gateway ID'
+    Value: !Ref AiBartenderApi
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiId'
+
+  PublicApiKey:
+    Description: 'Public API Key for frontend application'
+    Value: !Ref PublicApiKey
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicApiKey'
+
+  AdminApiKey:
+    Description: 'Admin API Key for admin operations'
+    Value: !Ref AdminApiKey
+    Export:
+      Name: !Sub '${AWS::StackName}-AdminApiKey'
+
+  PublicUsagePlanId:
+    Description: 'Public Usage Plan ID'
+    Value: !Ref PublicUsagePlan
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicUsagePlanId'
+
+  AdminUsagePlanId:
+    Description: 'Admin Usage Plan ID'
+    Value: !Ref AdminUsagePlan
+    Export:
+      Name: !Sub '${AWS::StackName}-AdminUsagePlanId'
+
+  McpToolsApiKeySecretArn:
+    Description: 'ARN of the Secrets Manager secret containing the MCP tools API key'
+    Value: !Ref McpToolsApiKeySecret
+    Export:
+      Name: !Sub '${AWS::StackName}-McpToolsApiKeySecretArn'
+
+  McpToolsApiKeySecretName:
+    Description: 'Name of the Secrets Manager secret containing the MCP tools API key'
+    Value: !Sub '${Application}/mcp-tools-api-key'
+    Export:
+      Name: !Sub '${AWS::StackName}-McpToolsApiKeySecretName'

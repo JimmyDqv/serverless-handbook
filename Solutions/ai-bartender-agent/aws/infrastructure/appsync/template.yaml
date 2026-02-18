@@ -1,0 +1,75 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'AI Bartender - AppSync Events API for real-time order updates'
+
+Parameters:
+  Application:
+    Type: String
+    Description: Name of owning application
+    Default: ai-bartender
+
+Resources:
+  # AppSync Events API
+  OrderEventsApi:
+    Type: AWS::AppSync::Api
+    Properties:
+      Name: !Sub '${Application}-order-events'
+      EventConfig:
+        AuthProviders:
+          - AuthType: API_KEY
+        ConnectionAuthModes:
+          - AuthType: API_KEY
+        DefaultPublishAuthModes:
+          - AuthType: API_KEY
+        DefaultSubscribeAuthModes:
+          - AuthType: API_KEY
+
+  # API Key for AppSync Events (valid for 365 days)
+  OrderEventsApiKey:
+    Type: AWS::AppSync::ApiKey
+    Properties:
+      ApiId: !GetAtt OrderEventsApi.ApiId
+      Description: 'API Key for order events real-time updates'
+      Expires: 1798629642  # 2026-12-30
+
+  # Channel Namespace for orders
+  OrdersChannelNamespace:
+    Type: AWS::AppSync::ChannelNamespace
+    Properties:
+      ApiId: !GetAtt OrderEventsApi.ApiId
+      Name: orders
+      PublishAuthModes:
+        - AuthType: API_KEY
+      SubscribeAuthModes:
+        - AuthType: API_KEY
+
+Outputs:
+  EventsApiId:
+    Description: 'AppSync Events API ID'
+    Value: !GetAtt OrderEventsApi.ApiId
+    Export:
+      Name: !Sub '${Application}-events:api-id'
+
+  EventsApiDns:
+    Description: 'AppSync Events API DNS endpoint'
+    Value: !GetAtt OrderEventsApi.Dns.Http
+    Export:
+      Name: !Sub '${Application}-events:api-dns'
+
+  EventsApiRealtimeDns:
+    Description: 'AppSync Events API Realtime DNS endpoint for WebSocket connections'
+    Value: !GetAtt OrderEventsApi.Dns.Realtime
+    Export:
+      Name: !Sub '${Application}-events:api-realtime-dns'
+
+  EventsApiKeyId:
+    Description: 'AppSync Events API Key ID'
+    Value: !Ref OrderEventsApiKey
+    Export:
+      Name: !Sub '${Application}-events:api-key-id'
+
+  EventsApiKey:
+    Description: 'AppSync Events API Key value'
+    Value: !GetAtt OrderEventsApiKey.ApiKey
+    Export:
+      Name: !Sub '${Application}-events:api-key'

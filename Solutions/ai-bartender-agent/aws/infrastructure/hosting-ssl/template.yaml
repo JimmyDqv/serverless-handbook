@@ -1,0 +1,34 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: AI Bartender SSL Certificate (must be deployed in us-east-1 for CloudFront)
+
+Parameters:
+  Application:
+    Type: String
+    Description: Name of owning application
+    Default: ai-bartender
+  DomainName:
+    Type: String
+    Description: Custom domain name for the application
+  HostedZoneId:
+    Type: String
+    Description: Route53 Hosted Zone ID
+
+Resources:
+  SSLCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref DomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref DomainName
+          HostedZoneId: !Ref HostedZoneId
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+
+Outputs:
+  CertificateArn:
+    Description: The ARN of the SSL certificate for CloudFront
+    Value: !Ref SSLCertificate
+    Export:
+      Name: !Sub ${AWS::StackName}:certificate-arn

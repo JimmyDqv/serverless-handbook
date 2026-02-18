@@ -1,0 +1,260 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'Chat API - Streaming and sync endpoints for AI Bartender'
+
+Parameters:
+  Application:
+    Type: String
+    Default: ai-bartender
+
+  ChatApiDomainName:
+    Type: String
+    Description: Custom domain name for Chat API
+
+  HostedZoneId:
+    Type: String
+    Description: Route53 Hosted Zone ID
+
+  AgentCoreStackName:
+    Type: String
+    Description: Name of the AgentCore stack (for memory and gateway)
+    Default: ai-bartender-agentcore
+
+Globals:
+  Function:
+    Tracing: Active
+  Api:
+    TracingEnabled: true
+
+Resources:
+  ChatApiSSLCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref ChatApiDomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref ChatApiDomainName
+          HostedZoneId: !Ref HostedZoneId
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+
+  ChatStreamingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Application}-chat-streaming'
+      CodeUri: src/chat-streaming/
+      Handler: run.sh
+      Runtime: python3.13
+      Architectures:
+        - arm64
+      Timeout: 120
+      MemorySize: 512
+      # AWS Lambda Web Adapter - enables response streaming for Python
+      # Published by AWS (awslabs) - wraps FastAPI app and handles streaming
+      # https://github.com/awslabs/aws-lambda-web-adapter
+      Layers:
+        - !Sub arn:aws:lambda:${AWS::Region}:753240598075:layer:LambdaAdapterLayerArm64:25
+      Environment:
+        Variables:
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/bootstrap
+          PORT: 8080
+          AWS_LWA_INVOKE_MODE: RESPONSE_STREAM
+          AGENTCORE_GATEWAY_URL:
+            Fn::ImportValue: !Sub '${AgentCoreStackName}:gateway-url'
+          AGENTCORE_MEMORY_ID:
+            Fn::ImportValue: !Sub '${AgentCoreStackName}:memory-id'
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: BedrockInvoke
+              Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource: "*"
+            - Sid: AgentCoreMemory
+              Effect: Allow
+              Action:
+                - bedrock-agentcore:CreateEvent
+                - bedrock-agentcore:ListEvents
+                - bedrock-agentcore:GetEvent
+                - bedrock-agentcore:CreateSession
+                - bedrock-agentcore:GetSession
+                - bedrock-agentcore:ListSessions
+                - bedrock-agentcore:ListMemoryRecords
+                - bedrock-agentcore:RetrieveMemoryRecords
+              Resource: "*"
+            - Sid: AgentCoreGateway
+              Effect: Allow
+              Action:
+                - bedrock-agentcore:InvokeGateway
+              Resource:
+                Fn::ImportValue: !Sub '${AgentCoreStackName}:gateway-arn'
+
+  ChatSyncFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Application}-chat-sync'
+      CodeUri: src/chat-sync/
+      Handler: handler.handler
+      Runtime: python3.13
+      Architectures:
+        - arm64
+      Timeout: 120
+      MemorySize: 512
+      Environment:
+        Variables:
+          AGENTCORE_GATEWAY_URL:
+            Fn::ImportValue: !Sub '${AgentCoreStackName}:gateway-url'
+          AGENTCORE_MEMORY_ID:
+            Fn::ImportValue: !Sub '${AgentCoreStackName}:memory-id'
+          POWERTOOLS_SERVICE_NAME: !Sub '${Application}-chat-sync'
+          POWERTOOLS_LOG_LEVEL: INFO
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: BedrockInvoke
+              Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource: "*"
+            - Sid: AgentCoreMemory
+              Effect: Allow
+              Action:
+                - bedrock-agentcore:CreateEvent
+                - bedrock-agentcore:ListEvents
+                - bedrock-agentcore:GetEvent
+                - bedrock-agentcore:CreateSession
+                - bedrock-agentcore:GetSession
+                - bedrock-agentcore:ListSessions
+                - bedrock-agentcore:ListMemoryRecords
+                - bedrock-agentcore:RetrieveMemoryRecords
+              Resource: "*"
+            - Sid: AgentCoreGateway
+              Effect: Allow
+              Action:
+                - bedrock-agentcore:InvokeGateway
+              Resource:
+                Fn::ImportValue: !Sub '${AgentCoreStackName}:gateway-arn'
+
+  ChatApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub '${Application}-chat-api'
+      StageName: v1
+      EndpointConfiguration: REGIONAL
+      DefinitionBody:
+        Fn::Transform:
+          Name: AWS::Include
+          Parameters:
+            Location: ./openapi.yaml
+
+  ChatApiLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ChatStreamingFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ChatApi}/*/POST/chat"
+
+  ChatSyncApiLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ChatSyncFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ChatApi}/*/POST/chat/sync"
+
+  ChatApiDomainNameResource:
+    Type: AWS::ApiGateway::DomainName
+    Properties:
+      DomainName: !Ref ChatApiDomainName
+      RegionalCertificateArn: !Ref ChatApiSSLCertificate
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      SecurityPolicy: TLS_1_2
+
+  ChatApiBasePathMapping:
+    Type: AWS::ApiGateway::BasePathMapping
+    DependsOn: ChatApiv1Stage
+    Properties:
+      DomainName: !Ref ChatApiDomainNameResource
+      RestApiId: !Ref ChatApi
+      Stage: v1
+
+  ChatApiDnsRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref ChatApiDomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt ChatApiDomainNameResource.RegionalDomainName
+        HostedZoneId: !GetAtt ChatApiDomainNameResource.RegionalHostedZoneId
+
+  ChatApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    DependsOn: ChatApiv1Stage
+    Properties:
+      Name: !Sub '${Application}-chat-api-key'
+      Description: 'API key for streaming chat endpoint'
+      Enabled: true
+      StageKeys:
+        - RestApiId: !Ref ChatApi
+          StageName: v1
+
+  ChatApiUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    DependsOn: ChatApiv1Stage
+    Properties:
+      UsagePlanName: !Sub '${Application}-chat-usage-plan'
+      Description: 'Usage plan for streaming chat API'
+      ApiStages:
+        - ApiId: !Ref ChatApi
+          Stage: v1
+      Throttle:
+        RateLimit: 50
+        BurstLimit: 100
+
+  ChatApiUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref ChatApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref ChatApiUsagePlan
+
+Outputs:
+  ChatStreamingApiUrl:
+    Description: 'Chat API streaming endpoint URL (direct)'
+    Value: !Sub 'https://${ChatApi}.execute-api.${AWS::Region}.amazonaws.com/v1/chat'
+    Export:
+      Name: !Sub '${AWS::StackName}:streaming-api-url'
+
+  ChatSyncApiUrl:
+    Description: 'Chat API sync endpoint URL (direct)'
+    Value: !Sub 'https://${ChatApi}.execute-api.${AWS::Region}.amazonaws.com/v1/chat/sync'
+    Export:
+      Name: !Sub '${AWS::StackName}:sync-api-url'
+
+  ChatStreamingCustomDomainUrl:
+    Description: 'Chat API streaming custom domain URL'
+    Value: !Sub 'https://${ChatApiDomainName}/chat'
+    Export:
+      Name: !Sub '${AWS::StackName}:streaming-custom-domain-url'
+
+  ChatSyncCustomDomainUrl:
+    Description: 'Chat API sync custom domain URL'
+    Value: !Sub 'https://${ChatApiDomainName}/chat/sync'
+    Export:
+      Name: !Sub '${AWS::StackName}:sync-custom-domain-url'
+
+  ChatApiKeyId:
+    Description: 'Chat API Key ID'
+    Value: !Ref ChatApiKey
+    Export:
+      Name: !Sub '${AWS::StackName}:api-key-id'

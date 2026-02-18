@@ -1,0 +1,226 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: >
+  AI Bartender AgentCore Infrastructure
+  - AgentCore Gateway with MCP tools
+  - MCP Tool Lambda for drink operations
+  - AgentCore Memory for conversation persistence
+
+Parameters:
+  Application:
+    Type: String
+    Default: ai-bartender
+
+  DatastoreStackName:
+    Type: String
+    Default: ai-bartender-datastore
+    Description: Name of the datastore CloudFormation stack (for DSQL connection)
+
+  MemoryEventExpiryDays:
+    Type: Number
+    Default: 30
+    MinValue: 7
+    MaxValue: 365
+    Description: Days to retain conversation events in short-term memory (7-365)
+
+Resources:
+  McpToolsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: "MCP tool handler for AgentCore Gateway - provides drink-related tools"
+      CodeUri: src/mcp-tools/
+      Handler: handler.handler
+      Runtime: python3.13
+      Architectures:
+        - arm64
+      Timeout: 30
+      MemorySize: 256
+      Tracing: Active
+      Environment:
+        Variables:
+          DSQL_CLUSTER_ENDPOINT:
+            Fn::ImportValue: !Sub "${DatastoreStackName}:dsql-cluster-endpoint"
+          DATABASE_READER_ROLE:
+            Fn::ImportValue: !Sub "${DatastoreStackName}:dsql-data-reader-role-arn"
+          DATABASE_USER:
+            Fn::ImportValue: !Sub "${DatastoreStackName}:dsql-db-reader-user"
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AWSXRayDaemonWriteAccess
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - sts:AssumeRole
+              Resource:
+                Fn::ImportValue: !Sub "${DatastoreStackName}:dsql-data-reader-role-arn"
+            - Effect: Allow
+              Action:
+                - dsql:DbConnect
+              Resource:
+                - !Sub
+                  - "arn:aws:dsql:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterId}"
+                  - ClusterId:
+                      Fn::ImportValue: !Sub "${DatastoreStackName}:dsql-cluster-identifier"
+
+  BartenderMemory:
+    Type: AWS::BedrockAgentCore::Memory
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - I3010
+    Properties:
+      Name: ai_bartender_memory
+      Description: >
+        Memory store for the bartender chatbot. Stores conversation context
+        (short-term) and learns user drink preferences over time (long-term).
+
+      EventExpiryDuration: !Ref MemoryEventExpiryDays
+      MemoryStrategies:
+        - UserPreferenceMemoryStrategy:
+            Name: DrinkPreferences
+            Description: Extracts and stores user drink preferences (spirits, flavors, dislikes)
+            Namespaces:
+              - preferences/{actorId}
+
+  AgentCoreGatewayRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${Application}-agentcore-gateway-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AgentCoreGatewayPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt McpToolsFunction.Arn
+
+  GatewayLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/vendedlogs/bedrock-agentcore/gateway/APPLICATION_LOGS/${Application}-bartender-gateway"
+      RetentionInDays: 30
+
+  BartenderGateway:
+    Type: AWS::BedrockAgentCore::Gateway
+    Properties:
+      Name: !Sub "${Application}-bartender-gateway"
+      Description: "MCP Gateway exposing drinks API for the bartender agent"
+
+      ProtocolType: MCP
+      AuthorizerType: AWS_IAM
+      RoleArn: !GetAtt AgentCoreGatewayRole.Arn
+      ExceptionLevel: DEBUG
+
+  DrinksToolsTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    Properties:
+      Name: !Sub "${Application}-drinks-tools-target"
+      Description: "MCP tools for drink recommendations - decoupled from API"
+
+      GatewayIdentifier: !Ref BartenderGateway
+      CredentialProviderConfigurations:
+        - CredentialProviderType: GATEWAY_IAM_ROLE
+
+      TargetConfiguration:
+        Mcp:
+          Lambda:
+            LambdaArn: !GetAtt McpToolsFunction.Arn
+            ToolSchema:
+              InlinePayload:
+                - Name: getDrinks
+                  Description: >
+                    Retrieves a list of all available cocktails and drinks from the menu.
+                    Use this to find drinks that match customer preferences based on
+                    ingredients, flavor profile, or type of drink. Returns drink names,
+                    descriptions, and ingredient lists. The response includes drink ID,
+                    name, description, ingredients array, and image URL for each drink.
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      section_id:
+                        Type: string
+                        Description: Optional section ID to filter drinks by category/section
+                    Required: []
+
+  GatewayLogDeliverySource:
+    Type: AWS::Logs::DeliverySource
+    DependsOn: BartenderGateway
+    Properties:
+      Name: !Sub "${Application}-gateway-log-source"
+      ResourceArn: !GetAtt BartenderGateway.GatewayArn
+      LogType: APPLICATION_LOGS
+
+  GatewayLogDeliveryDestination:
+    Type: AWS::Logs::DeliveryDestination
+    Properties:
+      Name: !Sub "${Application}-gateway-log-destination"
+      DestinationResourceArn: !GetAtt GatewayLogGroup.Arn
+
+  GatewayLogDelivery:
+    Type: AWS::Logs::Delivery
+    DependsOn:
+      - GatewayLogDeliverySource
+      - GatewayLogDeliveryDestination
+    Properties:
+      DeliverySourceName: !Sub "${Application}-gateway-log-source"
+      DeliveryDestinationArn: !GetAtt GatewayLogDeliveryDestination.Arn
+
+Outputs:
+  GatewayArn:
+    Description: ARN of the AgentCore Gateway
+    Value: !GetAtt BartenderGateway.GatewayArn
+    Export:
+      Name: !Sub "${AWS::StackName}:gateway-arn"
+
+  GatewayUrl:
+    Description: URL of the AgentCore Gateway (MCP endpoint)
+    Value: !GetAtt BartenderGateway.GatewayUrl
+    Export:
+      Name: !Sub "${AWS::StackName}:gateway-url"
+
+  GatewayId:
+    Description: ID of the AgentCore Gateway
+    Value: !GetAtt BartenderGateway.GatewayIdentifier
+    Export:
+      Name: !Sub "${AWS::StackName}:gateway-id"
+
+  MemoryId:
+    Description: ID of the AgentCore Memory (used by Chat Lambda)
+    Value: !GetAtt BartenderMemory.MemoryId
+    Export:
+      Name: !Sub "${AWS::StackName}:memory-id"
+
+  MemoryArn:
+    Description: ARN of the AgentCore Memory
+    Value: !GetAtt BartenderMemory.MemoryArn
+    Export:
+      Name: !Sub "${AWS::StackName}:memory-arn"
+
+  McpToolsLambdaArn:
+    Description: ARN of the MCP Tools Lambda function
+    Value: !GetAtt McpToolsFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}:mcp-tools-lambda-arn"
+
+  GatewayLogGroupName:
+    Description: CloudWatch Log Group for Gateway logs
+    Value: !Ref GatewayLogGroup
+    Export:
+      Name: !Sub "${AWS::StackName}:gateway-log-group-name"
+
+  GatewayLogGroupArn:
+    Description: ARN of the Gateway CloudWatch Log Group
+    Value: !GetAtt GatewayLogGroup.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}:gateway-log-group-arn"

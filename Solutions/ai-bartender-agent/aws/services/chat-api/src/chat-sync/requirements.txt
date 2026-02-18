@@ -1,0 +1,4 @@
+aws-lambda-powertools[tracer]>=2.0.0
+strands-agents>=0.1.0
+bedrock-agentcore>=0.1.0
+mcp-proxy-for-aws>=0.1.0

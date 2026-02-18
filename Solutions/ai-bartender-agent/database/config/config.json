@@ -1,0 +1,6 @@
+{
+  "cluster_endpoint": "your-cluster.dsql.eu-west-1.on.aws",
+  "aws_region": "eu-west-1",
+  "database": "postgres",
+  "images_bucket": "your-images-bucket-name"
+}

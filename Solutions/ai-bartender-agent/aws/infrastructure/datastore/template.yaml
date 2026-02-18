@@ -1,0 +1,133 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: AI Bartender DSQL Data Store and Infrastructure
+
+Parameters:
+  Application:
+    Type: String
+    Description: Name of owning application
+    Default: ai-bartender
+
+Resources:
+  # Aurora DSQL Cluster
+  DSQLCluster:
+    Type: AWS::DSQL::Cluster
+    Properties:
+      DeletionProtectionEnabled: true
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: Name
+          Value: !Sub ${Application}-data-store
+
+  # IAM Role for database write operations (to be assumed by Lambda functions)
+  DataWriterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${Application}-data-writer-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action:
+              - sts:AssumeRole
+            Condition:
+              StringLike:
+                aws:PrincipalArn: !Sub "arn:aws:iam::${AWS::AccountId}:role/*${Application}*"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${Application}-data-writer-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dsql:*
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+
+  # IAM Role for database read operations (to be assumed by Lambda functions)
+  DataReaderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${Application}-data-reader-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action:
+              - sts:AssumeRole
+            Condition:
+              StringLike:
+                aws:PrincipalArn: !Sub "arn:aws:iam::${AWS::AccountId}:role/*${Application}*"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${Application}-data-reader-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dsql:DbConnect
+                  - dsql:DbConnectAdmin
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+
+###########################################################################
+# Outputs
+###########################################################################
+Outputs:
+  DSQLClusterIdentifier:
+    Description: The DSQL Cluster Identifier
+    Value: !GetAtt DSQLCluster.Identifier
+    Export:
+      Name: !Sub ${AWS::StackName}:dsql-cluster-identifier
+
+  DSQLClusterEndpoint:
+    Description: The DSQL Cluster Endpoint
+    Value: !Sub ${DSQLCluster.Identifier}.dsql.${AWS::Region}.on.aws
+    Export:
+      Name: !Sub ${AWS::StackName}:dsql-cluster-endpoint
+
+  DataWriterRoleArn:
+    Description: The Role ARN for writing to DSQL
+    Value: !GetAtt DataWriterRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:dsql-data-writer-role-arn
+
+  DataReaderRoleArn:
+    Description: The Role ARN for reading from DSQL
+    Value: !GetAtt DataReaderRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:dsql-data-reader-role-arn
+
+
+
+  DSQLReaderUser:
+    Description: The user name for the DSQL database reader
+    Value: lambda_drink_reader
+    Export:
+      Name: !Sub ${AWS::StackName}:dsql-db-reader-user
+
+  DSQLWriterUser:
+    Description: The user name for the DSQL database writer
+    Value: lambda_drink_writer
+    Export:
+      Name: !Sub ${AWS::StackName}:dsql-db-writer-user
+

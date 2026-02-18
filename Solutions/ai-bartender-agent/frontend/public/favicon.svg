@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="cocktailGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#00D9C0;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0099CC;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Cocktail glass -->
+  <path d="M 20 10 L 80 10 L 50 50 L 50 80 L 35 80 L 35 85 L 65 85 L 65 80 L 50 80 L 50 50 Z" 
+        fill="url(#cocktailGradient)" 
+        stroke="#333" 
+        stroke-width="2"/>
+  
+  <!-- Liquid -->
+  <path d="M 28 20 L 72 20 L 50 48 Z" 
+        fill="#00D9C0" 
+        opacity="0.8"/>
+  
+  <!-- Garnish (cherry) -->
+  <circle cx="48" cy="18" r="4" fill="#FF4444"/>
+  
+  <!-- Base -->
+  <rect x="30" y="85" width="40" height="3" rx="1.5" fill="#333"/>
+</svg>

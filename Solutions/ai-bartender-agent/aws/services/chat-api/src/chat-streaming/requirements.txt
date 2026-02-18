@@ -1,0 +1,5 @@
+fastapi>=0.115.0
+uvicorn>=0.30.0
+strands-agents>=1.0.0
+bedrock-agentcore>=1.0.0
+mcp-proxy-for-aws>=1.0.0

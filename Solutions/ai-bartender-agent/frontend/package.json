@@ -1,0 +1,49 @@
+{
+  "name": "ai-bartender-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@aws-amplify/ui-react": "^6.0.0",
+    "@headlessui/react": "^1.7.14",
+    "@heroicons/react": "^2.0.17",
+    "@tailwindcss/forms": "^0.5.3",
+    "@types/react": "^18.0.33",
+    "@types/react-dom": "^18.0.11",
+    "autoprefixer": "^10.4.14",
+    "aws-amplify": "^6.0.0",
+    "framer-motion": "^10.12.4",
+    "postcss": "^8.4.23",
+    "react": "^18.2.0",
+    "react-confetti": "^6.1.0",
+    "react-dom": "^18.2.0",
+    "react-hot-toast": "^2.4.1",
+    "react-router-dom": "^6.10.0",
+    "tailwindcss": "^3.3.0",
+    "typescript": "^4.9.5",
+    "web-vitals": "^2.1.4"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "build:analyze": "ANALYZE=true tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:ui": "vitest --ui"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^13.4.0",
+    "@testing-library/user-event": "^13.5.0",
+    "@types/jest": "^27.5.2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@types/node": "^25.0.3",
+    "@types/react-router-dom": "^5.3.3",
+    "@vitejs/plugin-react": "^5.1.2",
+    "@vitest/ui": "^4.0.16",
+    "jsdom": "^27.3.0",
+    "rollup-plugin-visualizer": "^6.0.5",
+    "sharp": "^0.34.5",
+    "vite": "^7.3.0",
+    "vite-plugin-pwa": "^1.2.0",
+    "vitest": "^4.0.16"
+  }
+}

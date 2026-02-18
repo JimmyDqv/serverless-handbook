@@ -1,0 +1,174 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'AI Bartender Authentication - AWS Cognito User Pool'
+
+Parameters:
+  Application:
+    Type: String
+    Description: Name of owning application
+    Default: ai-bartender
+  DomainName:
+    Type: String
+    Description: Domain name of owning organization
+  HostedAuthDomainPrefix:
+    Type: String
+    Description: The domain prefix to use for the UserPool hosted UI <HostedAuthDomainPrefix>.auth.[region].amazoncognito.com
+  AddLocalHost:
+    Type: String
+    Description: Add localhost callback URLs for local development
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+
+Conditions:
+  IncludeLocalHost: !Equals [!Ref AddLocalHost, "true"]
+
+Resources:
+  AiBartenderUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub '${Application}-user-pool'
+      UsernameConfiguration:
+        CaseSensitive: false
+      AliasAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      EmailConfiguration:
+        EmailSendingAccount: COGNITO_DEFAULT
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+          TemporaryPasswordValidityDays: 7
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+        - Name: role
+          AttributeDataType: String
+          Required: false
+          Mutable: true
+      UserPoolTags:
+        Application: !Ref Application
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+
+  AiBartenderUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref AiBartenderUserPool
+      GenerateSecret: false
+      AllowedOAuthFlowsUserPoolClient: true
+      CallbackURLs:
+        - !Sub https://${DomainName}/signin
+        - !If [IncludeLocalHost, "https://localhost:5173/signin", !Ref "AWS::NoValue"]
+      LogoutURLs:
+        - !Sub https://${DomainName}/signout
+        - !If [IncludeLocalHost, "https://localhost:5173/signout", !Ref "AWS::NoValue"]
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthScopes:
+        - phone
+        - email
+        - openid
+        - profile
+      ReadAttributes:
+        - email
+        - name
+      WriteAttributes:
+        - email
+        - name
+      PreventUserExistenceErrors: ENABLED
+      SupportedIdentityProviders:
+        - COGNITO
+
+  AdminUserGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: admin
+      Description: Administrator group for bartenders
+      UserPoolId: !Ref AiBartenderUserPool
+      Precedence: 1
+
+  HostedUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Ref HostedAuthDomainPrefix
+      ManagedLoginVersion: 2
+      UserPoolId: !Ref AiBartenderUserPool
+
+  ManagedLoginStyle:
+    Type: AWS::Cognito::ManagedLoginBranding
+    Properties:
+      ClientId: !Ref AiBartenderUserPoolClient
+      UserPoolId: !Ref AiBartenderUserPool
+      UseCognitoProvidedValues: true
+
+  UserPoolEndpointParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/userPoolEndpoint
+      Type: String
+      Value: !Sub https://${HostedAuthDomainPrefix}.auth.${AWS::Region}.amazoncognito.com/oauth2/token
+      Description: SSM Parameter for the User Pool Endpoint
+      Tags:
+        Application: !Ref Application
+
+  UserPoolIdParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/userPoolId
+      Type: String
+      Value: !Ref AiBartenderUserPool
+      Description: SSM Parameter for the User Pool Id
+      Tags:
+        Application: !Ref Application
+
+  UserPoolHostedUiParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/userPoolHostedUi
+      Type: String
+      Value: !Sub https://${HostedAuthDomainPrefix}.auth.${AWS::Region}.amazoncognito.com/login?client_id=${AiBartenderUserPoolClient}&response_type=code&scope=email+openid+phone+profile&redirect_uri=https://${DomainName}/signin
+      Description: SSM Parameter for the User Pool Hosted UI
+      Tags:
+        Application: !Ref Application
+
+  ContentRootParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /${Application}/contentRoot
+      Type: String
+      Value: !Sub https://${DomainName}
+      Description: SSM Parameter for the Content Root
+      Tags:
+        Application: !Ref Application
+
+Outputs:
+  UserPoolId:
+    Description: 'Cognito User Pool ID'
+    Value: !Ref AiBartenderUserPool
+    Export:
+      Name: !Sub '${AWS::StackName}-UserPoolId'
+
+  UserPoolClientId:
+    Description: 'Cognito User Pool Client ID'
+    Value: !Ref AiBartenderUserPoolClient
+    Export:
+      Name: !Sub '${AWS::StackName}-UserPoolClientId'
+
+  UserPoolArn:
+    Description: 'Cognito User Pool ARN'
+    Value: !GetAtt AiBartenderUserPool.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-UserPoolArn'
