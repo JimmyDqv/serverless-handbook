@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where([data-theme="dark"] *));
+
+:root {
+  --base: #1a1a2e;
+  --surface: #232345;
+  --surface-alt: #232345;
+  --text-primary: #f5f0eb;
+  --text-body: #b0b0cc;
+  --text-muted: #9494b8;
+  --text-faded: #7878a0;
+  --accent-amber: #f59e0b;
+  --accent-amber-hover: #d97706;
+  --accent-blue: #3b82f6;
+  --accent-amber-subtle: rgba(245, 158, 11, 0.15);
+  --accent-blue-subtle: rgba(59, 130, 246, 0.1);
+  --border: rgba(245, 158, 11, 0.12);
+  --border-subtle: rgba(245, 158, 11, 0.06);
+  --surface-gradient-from: #232345;
+  --surface-gradient-to: #1a1a2e;
+  --badge-border-color: #1a1a2e;
+  --glow-amber: rgba(245, 158, 11, 0.1);
+  --glow-amber-faint: rgba(245, 158, 11, 0.04);
+  --glow-blue: rgba(59, 130, 246, 0.08);
+  --grain-opacity: 0.35;
+  --grain-blend: overlay;
+}
+
+[data-theme="light"] {
+  --base: #f5f0eb;
+  --surface: #ffffff;
+  --surface-alt: #f8f6f3;
+  --text-primary: #1a1a2e;
+  --text-body: #4a4a6b;
+  --text-muted: #6b6b8d;
+  --text-faded: #9494b8;
+  --accent-amber: #d97706;
+  --accent-amber-hover: #b45309;
+  --accent-blue: #2563eb;
+  --accent-amber-subtle: rgba(217, 119, 6, 0.08);
+  --accent-blue-subtle: rgba(37, 99, 235, 0.04);
+  --border: rgba(26, 26, 46, 0.08);
+  --border-subtle: rgba(26, 26, 46, 0.04);
+  --surface-gradient-from: #f8f6f3;
+  --surface-gradient-to: #ffffff;
+  --badge-border-color: #ffffff;
+  --glow-amber: rgba(217, 119, 6, 0.07);
+  --glow-amber-faint: rgba(217, 119, 6, 0.03);
+  --glow-blue: rgba(37, 99, 235, 0.05);
+  --grain-opacity: 0.15;
+  --grain-blend: multiply;
+}
+
+body {
+  background-color: var(--base);
+  color: var(--text-body);
+  transition: background-color 0.2s, color 0.2s;
+}
+
+html {
+  scroll-behavior: smooth;
+  scrollbar-gutter: stable;
+}

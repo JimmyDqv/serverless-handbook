@@ -1,0 +1,14 @@
+{
+  "name": "Serverless Summit 2026",
+  "short_name": "SS '26",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ],
+  "theme_color": "#1a1a2e",
+  "background_color": "#1a1a2e",
+  "display": "standalone"
+}

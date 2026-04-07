@@ -1,0 +1,16 @@
+version: 0.1
+
+default:
+  global:
+    parameters:
+      stack_name: event-platform-hosting
+      region: eu-north-1
+  deploy:
+    parameters:
+      capabilities: CAPABILITY_IAM
+      confirm_changeset: false
+      resolve_s3: true
+      parameter_overrides:
+        - DomainName=YOUR_DOMAIN
+        - HostedZoneId=YOUR_HOSTED_ZONE_ID
+        - CertificateArn=YOUR_CERTIFICATE_ARN

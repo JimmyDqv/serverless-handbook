@@ -1,0 +1,18 @@
+version: 0.1
+
+default:
+  global:
+    parameters:
+      stack_name: event-platform-api
+      region: eu-north-1
+  deploy:
+    parameters:
+      capabilities: CAPABILITY_IAM
+      confirm_changeset: false
+      resolve_s3: true
+      parameter_overrides:
+        - AuthStackName=event-platform-auth
+        - MongoDbUri=YOUR_MONGODB_URI
+        - OidcAudience=YOUR_OIDC_AUDIENCE
+        - DomainName=YOUR_DOMAIN
+        - HostedZoneId=YOUR_HOSTED_ZONE_ID

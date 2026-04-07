@@ -1,0 +1,75 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: Event Platform - Auth Service (PDP)
+
+Parameters:
+  MongoDbUri:
+    Type: String
+    Description: MongoDB Atlas connection URI
+  OidcAudience:
+    Type: String
+    Description: OIDC audience value configured in Atlas Identity Provider
+  MongoDbDatabase:
+    Type: String
+    Description: MongoDB database name
+    Default: event-platform
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Timeout: 30
+    MemorySize: 256
+    Architectures:
+      - arm64
+
+Resources:
+  JwtKeys:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub ${AWS::StackName}/jwt-keys
+      Description: "RSA key pair for JWT signing. JSON: {\"privateKey\": \"...\", \"publicKey\": \"...\"} — update value manually"
+
+  LoginFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers/login.handler
+      Environment:
+        Variables:
+          MONGODB_URI: !Ref MongoDbUri
+          OIDC_AUDIENCE: !Ref OidcAudience
+          MONGODB_DATABASE: !Ref MongoDbDatabase
+          JWT_KEYS_ARN: !Ref JwtKeys
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: sts:GetWebIdentityToken
+              Resource: "*"
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref JwtKeys
+
+Outputs:
+  LoginFunctionArn:
+    Description: ARN of the Login Lambda Function
+    Value: !GetAtt LoginFunction.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:login-lambda-arn
+  LoginFunctionName:
+    Description: Name of the Login Lambda Function
+    Value: !Ref LoginFunction
+    Export:
+      Name: !Sub ${AWS::StackName}:login-lambda-name
+  LoginFunctionRoleArn:
+    Description: IAM Role ARN for Login Lambda (use in Atlas OIDC user mapping)
+    Value: !GetAtt LoginFunctionRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:login-role-arn
+  JwtKeysArn:
+    Description: ARN of the JWT keys secret in Secrets Manager
+    Value: !Ref JwtKeys
+    Export:
+      Name: !Sub ${AWS::StackName}:jwt-keys-arn

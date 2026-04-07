@@ -1,0 +1,453 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: Event Platform - API with PEP authorizer
+
+Parameters:
+  AuthStackName:
+    Type: String
+    Description: Name of the auth service stack
+  MongoDbUri:
+    Type: String
+    Description: MongoDB Atlas connection URI
+  OidcAudience:
+    Type: String
+    Description: OIDC audience value configured in Atlas Identity Provider
+  MongoDbDatabase:
+    Type: String
+    Description: MongoDB database name
+    Default: event-platform
+  DomainName:
+    Type: String
+    Description: Root domain name
+  HostedZoneId:
+    Type: String
+    Description: Route53 hosted zone ID
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Timeout: 10
+    MemorySize: 512
+    Architectures:
+      - arm64
+    Environment:
+      Variables:
+        MONGODB_URI: !Ref MongoDbUri
+        OIDC_AUDIENCE: !Ref OidcAudience
+        MONGODB_DATABASE: !Ref MongoDbDatabase
+        JWT_KEYS_ARN:
+          Fn::ImportValue: !Sub ${AuthStackName}:jwt-keys-arn
+        LOGIN_FUNCTION_NAME:
+          Fn::ImportValue: !Sub ${AuthStackName}:login-lambda-name
+        TRACKING_QUEUE_URL: !Ref TrackingQueue
+
+Resources:
+  AdminApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: $default
+      CorsConfiguration:
+        AllowOrigins:
+          - !Sub "https://${DomainName}"
+          - "http://localhost:5173"
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+      Auth:
+        DefaultAuthorizer: AdminAuthorizer
+        Authorizers:
+          AdminAuthorizer:
+            FunctionArn: !GetAtt AuthorizerFunction.Arn
+            FunctionInvokeRole: !GetAtt AuthorizerInvokeRole.Arn
+            Identity:
+              Headers:
+                - Authorization
+            AuthorizerPayloadFormatVersion: "2.0"
+            EnableSimpleResponses: true
+          GuestAuthorizer:
+            FunctionArn: !GetAtt GuestAuthorizerFunction.Arn
+            FunctionInvokeRole: !GetAtt GuestAuthorizerInvokeRole.Arn
+            Identity:
+              Headers:
+                - Authorization
+            AuthorizerPayloadFormatVersion: "2.0"
+            EnableSimpleResponses: true
+
+  AuthorizerInvokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeAuthorizer
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt AuthorizerFunction.Arn
+
+  TrackingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 60
+
+  ProcessTrackingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/tracking/
+      Handler: process_tracking.handler
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: sts:GetWebIdentityToken
+              Resource: "*"
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt TrackingQueue.Arn
+            BatchSize: 10
+
+  GuestAuthorizerInvokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeGuestAuthorizer
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt GuestAuthorizerFunction.Arn
+
+  GuestAuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/guest-authorizer/
+      Handler: authorizer.handler
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource:
+                Fn::ImportValue: !Sub ${AuthStackName}:jwt-keys-arn
+
+  AuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/authorizer/
+      Handler: authorizer.handler
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource:
+                Fn::ImportValue: !Sub ${AuthStackName}:jwt-keys-arn
+
+  LoginProxyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/auth/
+      Handler: login_proxy.handler
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource:
+                Fn::ImportValue: !Sub ${AuthStackName}:login-lambda-arn
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt TrackingQueue.QueueName
+      Events:
+        Login:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref AdminApi
+            Path: /auth/login
+            Method: POST
+            Auth:
+              Authorizer: NONE
+
+  LogoutFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/auth/
+      Handler: logout.handler
+      Policies:
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt TrackingQueue.QueueName
+      Events:
+        Logout:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref AdminApi
+            Path: /auth/logout
+            Method: POST
+            Auth:
+              Authorizer: NONE
+
+  GetRsvpFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/rsvp/
+      Handler: get_rsvp.handler
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: sts:GetWebIdentityToken
+              Resource: "*"
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt TrackingQueue.QueueName
+      Events:
+        GetRsvp:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref AdminApi
+            Path: /rsvp
+            Method: GET
+            Auth:
+              Authorizer: GuestAuthorizer
+
+  UpdateRsvpFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/rsvp/
+      Handler: update_rsvp.handler
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: sts:GetWebIdentityToken
+              Resource: "*"
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt TrackingQueue.QueueName
+      Events:
+        UpdateRsvp:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref AdminApi
+            Path: /rsvp
+            Method: PUT
+            Auth:
+              Authorizer: GuestAuthorizer
+
+  ListGuestsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/admin/
+      Handler: list_guests.handler
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: sts:GetWebIdentityToken
+              Resource: "*"
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt TrackingQueue.QueueName
+      Events:
+        ListGuests:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref AdminApi
+            Path: /admin/guests
+            Method: GET
+
+  AddGuestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/admin/
+      Handler: add_guest.handler
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: sts:GetWebIdentityToken
+              Resource: "*"
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt TrackingQueue.QueueName
+      Events:
+        AddGuest:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref AdminApi
+            Path: /admin/guests
+            Method: POST
+
+  UpdateGuestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/admin/
+      Handler: update_guest.handler
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: sts:GetWebIdentityToken
+              Resource: "*"
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt TrackingQueue.QueueName
+      Events:
+        UpdateGuest:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref AdminApi
+            Path: /admin/guests/{guestId}
+            Method: PUT
+
+  DeleteGuestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/admin/
+      Handler: delete_guest.handler
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: sts:GetWebIdentityToken
+              Resource: "*"
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt TrackingQueue.QueueName
+      Events:
+        DeleteGuest:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref AdminApi
+            Path: /admin/guests/{guestId}
+            Method: DELETE
+
+  UpdateSettingsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/admin/
+      Handler: update_settings.handler
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: sts:GetWebIdentityToken
+              Resource: "*"
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt TrackingQueue.QueueName
+      Events:
+        UpdateSettings:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref AdminApi
+            Path: /admin/settings
+            Method: PUT
+
+  SetGroupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/admin/
+      Handler: set_group.handler
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: sts:GetWebIdentityToken
+              Resource: "*"
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt TrackingQueue.QueueName
+      Events:
+        SetGroup:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref AdminApi
+            Path: /admin/guests/{guestId}/group
+            Method: PUT
+
+  RemoveFromGroupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/admin/
+      Handler: remove_from_group.handler
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: sts:GetWebIdentityToken
+              Resource: "*"
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt TrackingQueue.QueueName
+      Events:
+        RemoveFromGroup:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref AdminApi
+            Path: /admin/guests/{guestId}/group
+            Method: DELETE
+
+  ApiCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Sub api.${DomainName}
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Sub api.${DomainName}
+          HostedZoneId: !Ref HostedZoneId
+
+  ApiDomainName:
+    Type: AWS::ApiGatewayV2::DomainName
+    Properties:
+      DomainName: !Sub api.${DomainName}
+      DomainNameConfigurations:
+        - EndpointType: REGIONAL
+          CertificateArn: !Ref ApiCertificate
+
+  ApiMapping:
+    Type: AWS::ApiGatewayV2::ApiMapping
+    Properties:
+      ApiId: !Ref AdminApi
+      DomainName: !Ref ApiDomainName
+      Stage: $default
+
+  ApiDomainRecordA:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub api.${DomainName}
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt ApiDomainName.RegionalDomainName
+        HostedZoneId: !GetAtt ApiDomainName.RegionalHostedZoneId
+
+  ApiDomainRecordAAAA:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub api.${DomainName}
+      Type: AAAA
+      AliasTarget:
+        DNSName: !GetAtt ApiDomainName.RegionalDomainName
+        HostedZoneId: !GetAtt ApiDomainName.RegionalHostedZoneId
+
+Outputs:
+  AdminApiUrl:
+    Description: Admin API endpoint URL
+    Value: !Sub https://${AdminApi}.execute-api.${AWS::Region}.amazonaws.com
+    Export:
+      Name: !Sub ${AWS::StackName}:admin-api-url

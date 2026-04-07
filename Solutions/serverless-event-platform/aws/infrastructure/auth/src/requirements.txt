@@ -1,0 +1,4 @@
+PyJWT[crypto]>=2.9.0
+pymongo[srv]>=4.7.0
+dnspython>=2.6.0
+boto3>=1.35.0

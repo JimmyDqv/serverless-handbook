@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="533" viewBox="0 0 400 533">
+  <rect width="400" height="533" fill="#1a1a2e"/>
+  <circle cx="200" cy="200" r="80" fill="#2a2a4a"/>
+  <circle cx="200" cy="180" r="35" fill="#3a3a5a"/>
+  <path d="M140 280 Q200 230 260 280 Q260 320 200 320 Q140 320 140 280Z" fill="#3a3a5a"/>
+  <text x="200" y="420" text-anchor="middle" fill="#666" font-family="sans-serif" font-size="14">Speaker Photo</text>
+</svg>
