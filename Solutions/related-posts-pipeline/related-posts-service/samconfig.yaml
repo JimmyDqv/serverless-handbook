@@ -1,0 +1,27 @@
+version: 0.1
+default:
+  global:
+    parameters:
+      stack_name: related-posts-service
+      region: eu-west-1
+      confirm_changeset: false
+      s3_prefix: related-posts-service
+      fail_on_empty_changeset: false
+      resolve_s3: true
+      capabilities: CAPABILITY_IAM
+  build:
+    parameters:
+      # Run makefile/esbuild builds in the source tree so the function Makefiles
+      # can vendor canonical modules from the solution-root shared/python/ directory.
+      build_in_source: true
+  deploy:
+    parameters:
+      parameter_overrides:
+        - Application=related-posts
+        - CommonStackName=related-posts-common
+        - AtlasRolesStackName=related-posts-atlas-roles
+        - BlogRepoOwner=<YOUR_GITHUB_OWNER>
+        - BlogRepoName=<YOUR_BLOG_REPO>
+        - DsqlClusterEndpoint=<YOUR_CLUSTER_ID>.dsql.eu-west-1.on.aws
+        - DsqlWriterRoleArn=arn:aws:iam::<YOUR_ACCOUNT_ID>:role/<YOUR_DSQL_WRITER_ROLE>
+        - DsqlDatabaseUser=<YOUR_DSQL_DB_USER>

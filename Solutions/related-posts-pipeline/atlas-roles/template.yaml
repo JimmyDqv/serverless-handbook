@@ -1,0 +1,43 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Related Posts pipeline atlas-roles — IAM role federated as a MongoDB Atlas database user. Consumed by blog-pipeline Lambdas (e.g. related-posts-service) via STS AssumeRole. Splitting the federated role from the Lambda execution roles means Atlas IAM federation is a one-time-per-role setup, decoupled from the lifecycle of the Lambdas that use it.
+
+Parameters:
+  Application:
+    Type: String
+    Description: Name of owning application
+    Default: related-posts
+
+Resources:
+  BlogPipelineAtlasRWRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${Application}-atlas-rw
+      Description: Federated as an Atlas database user with readWrite on blog.posts. Lambda execution roles in this account assume this role via STS to authenticate MongoDB Atlas connections (MONGODB-AWS mechanism).
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowSameAccountAssume
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:PrincipalAccount: !Ref AWS::AccountId
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+
+Outputs:
+  BlogPipelineAtlasRWRoleArn:
+    Description: ARN of the Atlas-federated readWrite role. Imported by related-posts-service (and any future blog-pipeline Atlas consumer). Federate this exact ARN as an Atlas database user with readWrite on blog.posts — one-time setup, never repeated as Lambdas redeploy.
+    Value: !GetAtt BlogPipelineAtlasRWRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:lambda-atlas-rw-role-arn
+
+  BlogPipelineAtlasRWRoleName:
+    Description: Name of the Atlas-federated readWrite role (useful for IAM console lookups).
+    Value: !Ref BlogPipelineAtlasRWRole
+    Export:
+      Name: !Sub ${AWS::StackName}:lambda-atlas-rw-role-name

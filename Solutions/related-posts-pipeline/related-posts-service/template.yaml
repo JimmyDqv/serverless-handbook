@@ -1,0 +1,435 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: related-posts-service — durable-function pipeline that finds 3 related posts for any blog post via MongoDB Atlas Vector Search + Strands Agent.
+
+Parameters:
+  Application:
+    Type: String
+    Default: related-posts
+  CommonStackName:
+    Type: String
+    Description: common stack — provides the EventBridge bus and the GitHub + Atlas secret ARNs (imported below).
+    Default: related-posts-common
+  AtlasRolesStackName:
+    Type: String
+    Description: atlas-roles stack — provides the Atlas-federated readWrite role that Lambdas STS-assume at runtime.
+    Default: related-posts-atlas-roles
+  BlogRepoOwner:
+    Type: String
+    Description: GitHub owner/org of the blog repository the pipeline reads from and opens PRs against.
+  BlogRepoName:
+    Type: String
+    Description: Name of the blog repository.
+  DsqlClusterEndpoint:
+    Type: String
+    Description: Hostname of your Amazon DSQL cluster (e.g. abc123.dsql.eu-west-1.on.aws). See database/schema.sql for the required tables.
+  DsqlWriterRoleArn:
+    Type: String
+    Description: ARN of the IAM role the Lambdas STS-assume for DSQL access (dsql:DbConnectAdmin).
+  DsqlDatabaseUser:
+    Type: String
+    Description: DSQL database user mapped to the writer role.
+
+Globals:
+  Function:
+    Timeout: 300
+    MemorySize: 512
+    Tracing: Active
+    Architectures:
+      - arm64
+    # JSON logs with no runtime-level filtering: verbosity is controlled in code
+    # via the LOG_LEVEL env var, and the unconditional incoming-event print is
+    # never suppressed (ApplicationLogLevel would treat stdout as INFO).
+    LoggingConfig:
+      LogFormat: JSON
+      ApplicationLogLevel: TRACE
+    Environment:
+      Variables:
+        LOG_LEVEL: INFO
+    Tags:
+      Application: !Ref Application
+
+Resources:
+  StagingBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${Application}-related-posts-staging
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireStagingObjects
+            Status: Enabled
+            ExpirationInDays: 30
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+
+  FetchSourceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambda/fetch-source
+      Handler: app.handler
+      Runtime: nodejs22.x
+      Timeout: 60
+      MemorySize: 512
+      AutoPublishAlias: live
+      Environment:
+        Variables:
+          GITHUB_SECRET_ARN:
+            Fn::ImportValue: !Sub ${CommonStackName}:github-token-secret-arn
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn:
+              Fn::ImportValue: !Sub ${CommonStackName}:github-token-secret-arn
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: es2022
+        Sourcemap: true
+        EntryPoints:
+          - app.ts
+        External:
+          - "@aws-sdk/*"
+
+  CommitPRFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambda/commit-pr
+      Handler: app.handler
+      Runtime: nodejs22.x
+      Timeout: 120
+      MemorySize: 512
+      AutoPublishAlias: live
+      Environment:
+        Variables:
+          GITHUB_SECRET_ARN:
+            Fn::ImportValue: !Sub ${CommonStackName}:github-token-secret-arn
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn:
+              Fn::ImportValue: !Sub ${CommonStackName}:github-token-secret-arn
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: es2022
+        Sourcemap: true
+        EntryPoints:
+          - app.ts
+        External:
+          - "@aws-sdk/*"
+
+  VectorSearchToolFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambda/vector-search-tool
+      Handler: handler.handler
+      Runtime: python3.13
+      Timeout: 20
+      MemorySize: 512
+      Environment:
+        Variables:
+          ATLAS_SECRET_ARN:
+            Fn::ImportValue: !Sub ${CommonStackName}:atlas-connection-secret-arn
+          ATLAS_ROLE_ARN:
+            Fn::ImportValue: !Sub ${AtlasRolesStackName}:lambda-atlas-rw-role-arn
+          AWS_STS_REGIONAL_ENDPOINTS: legacy
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn:
+              Fn::ImportValue: !Sub ${CommonStackName}:atlas-connection-secret-arn
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: sts:AssumeRole
+              Resource:
+                Fn::ImportValue: !Sub ${AtlasRolesStackName}:lambda-atlas-rw-role-arn
+    Metadata:
+      BuildMethod: makefile
+
+  ReadExcerptToolFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambda/read-excerpt-tool
+      Handler: handler.handler
+      Runtime: python3.13
+      Timeout: 20
+      MemorySize: 512
+      Environment:
+        Variables:
+          ATLAS_SECRET_ARN:
+            Fn::ImportValue: !Sub ${CommonStackName}:atlas-connection-secret-arn
+          ATLAS_ROLE_ARN:
+            Fn::ImportValue: !Sub ${AtlasRolesStackName}:lambda-atlas-rw-role-arn
+          AWS_STS_REGIONAL_ENDPOINTS: legacy
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn:
+              Fn::ImportValue: !Sub ${CommonStackName}:atlas-connection-secret-arn
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: sts:AssumeRole
+              Resource:
+                Fn::ImportValue: !Sub ${AtlasRolesStackName}:lambda-atlas-rw-role-arn
+    Metadata:
+      BuildMethod: makefile
+
+  GatewayExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:gateway/*
+      Policies:
+        - PolicyName: InvokeToolLambdas
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - !GetAtt VectorSearchToolFunction.Arn
+                  - !GetAtt ReadExcerptToolFunction.Arn
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+
+  RelatedPostsGateway:
+    Type: AWS::BedrockAgentCore::Gateway
+    Properties:
+      Name: !Sub ${Application}-related-posts-gw
+      ProtocolType: MCP
+      ProtocolConfiguration:
+        Mcp:
+          SearchType: SEMANTIC
+      RoleArn: !GetAtt GatewayExecutionRole.Arn
+      AuthorizerType: AWS_IAM
+      Tags:
+        Application: !Ref Application
+
+  VectorSearchTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    Properties:
+      GatewayIdentifier: !Ref RelatedPostsGateway
+      Name: vector-search-target
+      CredentialProviderConfigurations:
+        - CredentialProviderType: GATEWAY_IAM_ROLE
+      TargetConfiguration:
+        Mcp:
+          Lambda:
+            LambdaArn: !GetAtt VectorSearchToolFunction.Arn
+            ToolSchema:
+              InlinePayload:
+                - Name: vector_search
+                  Description: >
+                    Vector search over the blog posts corpus. Resolves the source post's stored
+                    1024-dim Titan v2 embedding from Atlas by source_slug + language, then returns
+                    up to k candidate posts ordered by semantic similarity. Optionally filter by
+                    language and exclude known slugs.
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      source_slug:
+                        Type: string
+                        Description: >
+                          The page_slug of the post we're finding related posts for. The tool
+                          looks up that post's stored 1024-dim Titan v2 embedding in Atlas and
+                          uses it as the query vector. Do NOT pass an embedding directly.
+                      language:
+                        Type: string
+                        Description: >
+                          Language variant of the source post (e.g., "en", "es"). Must match what
+                          the orchestrator embedded into Atlas. Also used to pre-filter candidates
+                          by the same language. Defaults to "en".
+                      k:
+                        Type: integer
+                        Description: Maximum number of candidates to return. Defaults to 20.
+                      exclude_slugs:
+                        Type: array
+                        Items:
+                          Type: string
+                        Description: Slugs to exclude from results — typically the source post itself.
+                    Required:
+                      - source_slug
+
+  ReadExcerptTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    Properties:
+      GatewayIdentifier: !Ref RelatedPostsGateway
+      Name: read-excerpt-target
+      CredentialProviderConfigurations:
+        - CredentialProviderType: GATEWAY_IAM_ROLE
+      TargetConfiguration:
+        Mcp:
+          Lambda:
+            LambdaArn: !GetAtt ReadExcerptToolFunction.Arn
+            ToolSchema:
+              InlinePayload:
+                - Name: read_post_excerpt
+                  Description: >
+                    Fetch the first N characters of a blog post body, by slug. Use to disambiguate
+                    between two semantically similar candidates when their summaries are not enough.
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      slug:
+                        Type: string
+                        Description: The post slug, e.g., "lambda-durable-functions-101".
+                      language:
+                        Type: string
+                        Description: Language code; defaults to "en".
+                      max_chars:
+                        Type: integer
+                        Description: Max characters of body to return. Defaults to 1000.
+                    Required:
+                      - slug
+
+  RelatedPostsOrchestrator:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambda/orchestrator
+      Handler: handler.handler
+      Runtime: python3.13
+      Timeout: 900
+      MemorySize: 1024
+      AutoPublishAlias: live
+      DurableConfig:
+        ExecutionTimeout: 3600
+        RetentionPeriodInDays: 7
+      Environment:
+        Variables:
+          ATLAS_SECRET_ARN:
+            Fn::ImportValue: !Sub ${CommonStackName}:atlas-connection-secret-arn
+          ATLAS_ROLE_ARN:
+            Fn::ImportValue: !Sub ${AtlasRolesStackName}:lambda-atlas-rw-role-arn
+          AWS_STS_REGIONAL_ENDPOINTS: legacy
+          FETCH_SOURCE_FUNCTION_ARN: !Sub ${FetchSourceFunction.Arn}:live
+          COMMIT_PR_FUNCTION_ARN: !Sub ${CommitPRFunction.Arn}:live
+          AGENTCORE_GATEWAY_URL: !GetAtt RelatedPostsGateway.GatewayUrl
+          DSQL_CLUSTER_ENDPOINT: !Ref DsqlClusterEndpoint
+          DATABASE_WRITER_ROLE: !Ref DsqlWriterRoleArn
+          DATABASE_USER: !Ref DsqlDatabaseUser
+          BLOG_REPO_OWNER: !Ref BlogRepoOwner
+          BLOG_REPO_NAME: !Ref BlogRepoName
+          EVENT_BUS_NAME:
+            Fn::ImportValue: !Sub ${CommonStackName}:event-bus-name
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicDurableExecutionRolePolicy
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn:
+              Fn::ImportValue: !Sub ${CommonStackName}:atlas-connection-secret-arn
+        - LambdaInvokePolicy:
+            FunctionName: !Ref FetchSourceFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref CommitPRFunction
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                - !Sub arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0
+                - !Sub arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/eu.anthropic.claude-sonnet-4-6
+                - !Sub arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-6
+            - Effect: Allow
+              Action: sts:AssumeRole
+              Resource:
+                - !Ref DsqlWriterRoleArn
+                - Fn::ImportValue: !Sub ${AtlasRolesStackName}:lambda-atlas-rw-role-arn
+            - Effect: Allow
+              Action: dsql:DbConnectAdmin
+              Resource: "*"
+            - Effect: Allow
+              Action: events:PutEvents
+              Resource:
+                Fn::ImportValue: !Sub ${CommonStackName}:event-bus-arn
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock-agentcore:InvokeGateway
+              Resource:
+                - !GetAtt RelatedPostsGateway.GatewayArn
+    Metadata:
+      BuildMethod: makefile
+
+  EventBridgeInvokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/${Application}-events/${Application}-related-posts-*
+      Policies:
+        - PolicyName: InvokeOrchestratorAlias
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !Sub ${RelatedPostsOrchestrator.Arn}:live
+
+  PostPublishedRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${Application}-related-posts-postpublished
+      EventBusName:
+        Fn::ImportValue: !Sub ${CommonStackName}:event-bus-arn
+      EventPattern:
+        source:
+          - blog.cms
+        detail-type:
+          - PostPublished
+      Targets:
+        - Id: orchestrator-live
+          Arn: !Sub ${RelatedPostsOrchestrator.Arn}:live
+          RoleArn: !GetAtt EventBridgeInvokeRole.Arn
+          InputPath: $.detail
+
+Outputs:
+  StagingBucketName:
+    Value: !Ref StagingBucket
+    Export:
+      Name: !Sub ${AWS::StackName}:staging-bucket-name
+  OrchestratorFunctionArn:
+    Description: Qualified ARN (alias `live`) of the durable orchestrator function.
+    Value: !Sub ${RelatedPostsOrchestrator.Arn}:live
+    Export:
+      Name: !Sub ${AWS::StackName}:orchestrator-function-arn

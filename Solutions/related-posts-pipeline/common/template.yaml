@@ -1,0 +1,68 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Related Posts pipeline — common shared secrets and parameters used by blog-pipeline sub-services.
+
+Parameters:
+  Application:
+    Type: String
+    Description: Name of owning application
+    Default: related-posts
+
+Resources:
+  GitHubTokenSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub ${Application}/github
+      Description: GitHub personal access token used by all blog-pipeline sub-services to interact with the GitHub API.
+      SecretString: '{"token": "REPLACE_ME"}'
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+
+  AtlasConnectionSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub ${Application}/atlas-connection
+      Description: MongoDB Atlas connection-string template (no password — IAM auth). Used by related-posts-service. After deploy, replace REPLACE_ME with the real SRV URI from the Atlas cluster (Atlas → Connect → Drivers → Python).
+      SecretString: '{"srvUri": "REPLACE_ME", "db": "blog", "collection": "posts"}'
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+
+  BlogPipelineEventBus:
+    Type: AWS::Events::EventBus
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub ${Application}-events
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+
+Outputs:
+  GitHubTokenSecretArn:
+    Description: ARN of the GitHub token secret — use this value for the GitHubSecretArn parameter in the translate-service samconfig.yaml.
+    Value: !Ref GitHubTokenSecret
+    Export:
+      Name: !Sub ${AWS::StackName}:github-token-secret-arn
+
+  AtlasConnectionSecretArn:
+    Description: ARN of the Atlas connection secret — use this value for the AtlasSecretArn parameter in the related-posts-service samconfig.yaml.
+    Value: !Ref AtlasConnectionSecret
+    Export:
+      Name: !Sub ${AWS::StackName}:atlas-connection-secret-arn
+
+  BlogPipelineEventBusArn:
+    Description: ARN of the generic blog-pipeline EventBridge bus.
+    Value: !GetAtt BlogPipelineEventBus.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:event-bus-arn
+
+  BlogPipelineEventBusName:
+    Description: Name of the generic blog-pipeline EventBridge bus.
+    Value: !Ref BlogPipelineEventBus
+    Export:
+      Name: !Sub ${AWS::StackName}:event-bus-name

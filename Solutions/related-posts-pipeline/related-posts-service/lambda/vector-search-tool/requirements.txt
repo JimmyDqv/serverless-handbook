@@ -1,0 +1,3 @@
+pymongo[aws]==4.10.1
+boto3>=1.40.30
+certifi==2024.8.30

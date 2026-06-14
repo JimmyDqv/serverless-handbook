@@ -1,0 +1,15 @@
+version: 0.1
+default:
+  global:
+    parameters:
+      stack_name: related-posts-atlas-roles
+      region: eu-west-1
+      confirm_changeset: false
+      s3_prefix: related-posts-atlas-roles
+      fail_on_empty_changeset: false
+      resolve_s3: true
+      capabilities: CAPABILITY_NAMED_IAM
+  deploy:
+    parameters:
+      parameter_overrides:
+        - Application=related-posts
